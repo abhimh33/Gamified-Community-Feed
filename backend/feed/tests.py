@@ -314,3 +314,47 @@ class KarmaEventTestCase(TestCase):
         
         events = KarmaEvent.objects.filter(recipient=self.author)
         self.assertEqual(events.count(), 0)
+
+
+class CommentDepthTestCase(TestCase):
+    """Test comment depth limit enforcement."""
+    
+    def setUp(self):
+        self.user = User.objects.create_user('user', 'u@test.com', 'pass')
+        self.post = Post.objects.create(author=self.user, title='Test', content='Content ' * 10)
+    
+    def test_max_depth_enforced(self):
+        """Comments should not nest beyond MAX_COMMENT_DEPTH."""
+        from .serializers import CommentCreateSerializer, MAX_COMMENT_DEPTH
+        
+        # Create a chain of comments up to max depth
+        parent = None
+        for depth in range(MAX_COMMENT_DEPTH):
+            comment = Comment.objects.create(
+                post=self.post,
+                author=self.user,
+                content=f'Depth {depth}',
+                parent=parent,
+                depth=depth
+            )
+            parent = comment
+        
+        # parent is now at MAX_COMMENT_DEPTH - 1, with depth = MAX_COMMENT_DEPTH - 1
+        # Actually, let's set the depth correctly
+        parent.depth = MAX_COMMENT_DEPTH  # At max depth
+        parent.save()
+        
+        # Try to create a child of max-depth comment
+        serializer = CommentCreateSerializer(
+            data={'content': 'Too deep', 'parent': parent.id},
+            context={'post_id': self.post.id}
+        )
+        
+        self.assertTrue(serializer.is_valid())  # Field validation passes
+        
+        # But create should fail
+        from rest_framework.exceptions import ValidationError
+        with self.assertRaises(ValidationError) as ctx:
+            serializer.save(author=self.user, post=self.post)
+        
+        self.assertIn('parent', str(ctx.exception))

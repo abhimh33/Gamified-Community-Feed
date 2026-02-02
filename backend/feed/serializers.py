@@ -19,6 +19,9 @@ from django.contrib.auth.models import User
 
 from .models import Post, Comment
 
+# Maximum depth for nested comments (prevents infinite nesting)
+MAX_COMMENT_DEPTH = 10
+
 
 class UserSerializer(serializers.ModelSerializer):
     """Minimal user representation for embedding in other objects."""
@@ -137,9 +140,14 @@ class CommentCreateSerializer(serializers.ModelSerializer):
         Create comment with proper depth calculation.
         
         Depth = parent.depth + 1 (or 0 for root comments)
+        Maximum depth is enforced to prevent infinite nesting.
         """
         parent = validated_data.get('parent')
         if parent:
+            if parent.depth >= MAX_COMMENT_DEPTH:
+                raise serializers.ValidationError({
+                    'parent': f'Maximum reply depth ({MAX_COMMENT_DEPTH}) reached. Cannot nest deeper.'
+                })
             validated_data['depth'] = parent.depth + 1
         else:
             validated_data['depth'] = 0
