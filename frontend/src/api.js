@@ -8,6 +8,18 @@
 const API_BASE = '/api';
 
 /**
+ * Custom error class for API validation errors
+ * Preserves field-level error details from DRF
+ */
+export class ApiValidationError extends Error {
+  constructor(fieldErrors, message = 'Validation failed') {
+    super(message);
+    this.name = 'ApiValidationError';
+    this.fieldErrors = fieldErrors; // { field: [errors], ... }
+  }
+}
+
+/**
  * Make an API request with proper headers and error handling
  */
 async function apiRequest(endpoint, options = {}) {
@@ -37,7 +49,12 @@ async function apiRequest(endpoint, options = {}) {
   const data = await response.json();
   
   if (!response.ok) {
-    throw new Error(data.error || `HTTP ${response.status}`);
+    // Handle DRF validation errors (HTTP 400)
+    // DRF returns: { "field": ["error1", "error2"], ... }
+    if (response.status === 400 && typeof data === 'object') {
+      throw new ApiValidationError(data, 'Validation failed');
+    }
+    throw new Error(data.error || data.detail || `HTTP ${response.status}`);
   }
   
   return data;
