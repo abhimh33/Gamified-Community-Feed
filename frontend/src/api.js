@@ -1,26 +1,11 @@
 /**
  * API Client for KarmaFeed Backend
  * 
- * All API calls go through this module for:
- * 1. Consistent error handling
- * 2. CSRF token management
- * 3. Base URL configuration
+ * Simplified auth-free version: All mutating actions use server-side demo user.
+ * No CSRF, no sessions, no cookies required.
  */
 
 const API_BASE = '/api';
-
-/**
- * Get CSRF token from cookie (Django sets this)
- */
-function getCsrfToken() {
-  const name = 'csrftoken';
-  const cookies = document.cookie.split(';');
-  for (let cookie of cookies) {
-    const [key, value] = cookie.trim().split('=');
-    if (key === name) return value;
-  }
-  return null;
-}
 
 /**
  * Make an API request with proper headers and error handling
@@ -32,21 +17,12 @@ async function apiRequest(endpoint, options = {}) {
     'Content-Type': 'application/json',
   };
   
-  // Add CSRF token for mutating requests
-  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(options.method)) {
-    const csrfToken = getCsrfToken();
-    if (csrfToken) {
-      defaultHeaders['X-CSRFToken'] = csrfToken;
-    }
-  }
-  
   const response = await fetch(url, {
     ...options,
     headers: {
       ...defaultHeaders,
       ...options.headers,
     },
-    credentials: 'include', // Include cookies for session auth
   });
   
   // Handle non-JSON responses
@@ -87,7 +63,7 @@ export async function fetchPost(postId) {
 }
 
 /**
- * Create a new post
+ * Create a new post (uses demo user server-side)
  */
 export async function createPost(title, content) {
   return apiRequest('/posts/', {
@@ -97,7 +73,7 @@ export async function createPost(title, content) {
 }
 
 /**
- * Create a comment on a post
+ * Create a comment on a post (uses demo user server-side)
  */
 export async function createComment(postId, content, parentId = null) {
   return apiRequest(`/posts/${postId}/comments/`, {
@@ -110,7 +86,7 @@ export async function createComment(postId, content, parentId = null) {
 }
 
 /**
- * Toggle like on post or comment
+ * Toggle like on post or comment (uses demo user server-side)
  */
 export async function toggleLike(targetType, targetId) {
   return apiRequest('/likes/toggle/', {
@@ -127,21 +103,4 @@ export async function toggleLike(targetType, targetId) {
  */
 export async function fetchLeaderboard(hours = 24, limit = 5) {
   return apiRequest(`/leaderboard/?hours=${hours}&limit=${limit}`);
-}
-
-/**
- * Mock login for development
- */
-export async function mockLogin(username) {
-  return apiRequest('/auth/mock-login/', {
-    method: 'POST',
-    body: JSON.stringify({ username }),
-  });
-}
-
-/**
- * Get current user info
- */
-export async function whoAmI() {
-  return apiRequest('/auth/whoami/');
 }

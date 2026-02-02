@@ -6,10 +6,14 @@ API endpoints for the feed application.
 
 AUTHENTICATION NOTE:
 --------------------
-For simplicity, we're using session authentication for the prototype.
-Production would use JWT or OAuth2.
+Authentication is DISABLED for this demo.
+All mutating actions use a fixed 'demo' user.
 
-For testing without authentication, we simulate a logged-in user.
+This simplifies testing and focuses on core functionality:
+- N+1 query prevention
+- Concurrency protection
+- Karma integrity
+- Leaderboard correctness
 """
 
 from rest_framework import generics, status, permissions
@@ -36,6 +40,18 @@ from .queries import (
 )
 from .services import toggle_like, like_post, like_comment, unlike_post, unlike_comment
 from .leaderboard import get_leaderboard, get_user_karma
+
+
+def get_demo_user():
+    """
+    Get the demo user for all mutating actions.
+    Creates the user if it doesn't exist.
+    """
+    user, _ = User.objects.get_or_create(
+        username='demo',
+        defaults={'email': 'demo@karmafeed.local'}
+    )
+    return user
 
 
 class FeedPagination(CursorPagination):
@@ -74,14 +90,14 @@ class PostCreateView(generics.CreateAPIView):
     """
     POST /api/posts/
     
-    Create a new post. Requires authentication.
+    Create a new post. Uses demo user.
     """
     serializer_class = PostCreateSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]
     
     def perform_create(self, serializer):
-        # Author is set from authenticated user, not from request body
-        serializer.save(author=self.request.user)
+        # Always use demo user for post creation
+        serializer.save(author=get_demo_user())
 
 
 class PostDetailView(APIView):
@@ -112,10 +128,10 @@ class PostDetailView(APIView):
         flat_comments = get_all_comments_for_post(post_id)
         comment_tree = build_comment_tree(flat_comments)
         
-        # Query 3: Get user's likes (if authenticated)
+        # Query 3: Get demo user's likes
         user_liked_data = {}
-        if request.user.is_authenticated:
-            user_liked_data = get_user_liked_items(request.user.id, post_id)
+        demo_user = get_demo_user()
+        user_liked_data = get_user_liked_items(demo_user.id, post_id)
         
         # Serialize with pre-built tree in context
         serializer = PostDetailSerializer(
@@ -134,7 +150,7 @@ class CommentCreateView(generics.CreateAPIView):
     """
     POST /api/posts/<post_id>/comments/
     
-    Create a comment on a post. Requires authentication.
+    Create a comment on a post. Uses demo user.
     
     Body:
     {
@@ -143,7 +159,7 @@ class CommentCreateView(generics.CreateAPIView):
     }
     """
     serializer_class = CommentCreateSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]
     
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -152,8 +168,9 @@ class CommentCreateView(generics.CreateAPIView):
     
     def perform_create(self, serializer):
         post = get_object_or_404(Post, id=self.kwargs['post_id'])
+        # Always use demo user for comments
         serializer.save(
-            author=self.request.user,
+            author=get_demo_user(),
             post=post
         )
 
@@ -162,7 +179,7 @@ class LikeToggleView(APIView):
     """
     POST /api/likes/toggle/
     
-    Toggle like on a post or comment.
+    Toggle like on a post or comment. Uses demo user.
     
     Body:
     {
@@ -181,7 +198,7 @@ class LikeToggleView(APIView):
     - Unique constraint prevents duplicates
     - IntegrityError handled gracefully
     """
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]
     
     def post(self, request):
         serializer = LikeActionSerializer(data=request.data)
@@ -191,7 +208,8 @@ class LikeToggleView(APIView):
         target_id = serializer.validated_data['target_id']
         
         try:
-            result = toggle_like(request.user, target_type, target_id)
+            # Always use demo user for likes
+            result = toggle_like(get_demo_user(), target_type, target_id)
             return Response({
                 'success': result.success,
                 'action': result.action,
@@ -208,13 +226,14 @@ class LikePostView(APIView):
     """
     POST /api/posts/<post_id>/like/
     
-    Like a specific post.
+    Like a specific post. Uses demo user.
     """
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]
     
     def post(self, request, post_id):
         try:
-            result = like_post(request.user, post_id)
+            # Always use demo user
+            result = like_post(get_demo_user(), post_id)
             return Response({
                 'success': result.success,
                 'action': result.action
@@ -227,7 +246,7 @@ class LikePostView(APIView):
     
     def delete(self, request, post_id):
         """Unlike a post."""
-        result = unlike_post(request.user, post_id)
+        result = unlike_post(get_demo_user(), post_id)
         return Response({
             'success': result.success,
             'action': result.action
@@ -238,13 +257,14 @@ class LikeCommentView(APIView):
     """
     POST /api/comments/<comment_id>/like/
     
-    Like a specific comment.
+    Like a specific comment. Uses demo user.
     """
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]
     
     def post(self, request, comment_id):
         try:
-            result = like_comment(request.user, comment_id)
+            # Always use demo user
+            result = like_comment(get_demo_user(), comment_id)
             return Response({
                 'success': result.success,
                 'action': result.action
@@ -258,7 +278,7 @@ class LikeCommentView(APIView):
     def delete(self, request, comment_id):
         """Unlike a comment."""
         from .services import unlike_comment
-        result = unlike_comment(request.user, comment_id)
+        result = unlike_comment(get_demo_user(), comment_id)
         return Response({
             'success': result.success,
             'action': result.action
@@ -291,15 +311,14 @@ class LeaderboardView(APIView):
         
         leaderboard = get_leaderboard(hours=hours, limit=limit)
         
-        # Add current user's stats if authenticated
-        user_stats = None
-        if request.user.is_authenticated:
-            user_karma = get_user_karma(request.user.id, hours=hours)
-            user_stats = {
-                'user_id': request.user.id,
-                'username': request.user.username,
-                'karma': user_karma
-            }
+        # Add demo user's stats
+        demo_user = get_demo_user()
+        user_karma = get_user_karma(demo_user.id, hours=hours)
+        user_stats = {
+            'user_id': demo_user.id,
+            'username': demo_user.username,
+            'karma': user_karma
+        }
         
         return Response({
             'leaderboard': LeaderboardEntrySerializer(leaderboard, many=True).data,
@@ -309,55 +328,5 @@ class LeaderboardView(APIView):
 
 
 # ============================================================================
-# DEVELOPMENT/TESTING HELPERS
+# END OF VIEWS - Auth removed for demo mode (all actions use demo user)
 # ============================================================================
-
-class MockAuthView(APIView):
-    """
-    POST /api/auth/mock-login/
-    
-    DEVELOPMENT ONLY: Quick login for testing without full auth flow.
-    Creates user if doesn't exist.
-    
-    Body: { "username": "testuser" }
-    """
-    permission_classes = [permissions.AllowAny]
-    
-    def post(self, request):
-        username = request.data.get('username', 'testuser')
-        user, created = User.objects.get_or_create(
-            username=username,
-            defaults={'email': f'{username}@example.com'}
-        )
-        
-        # Log the user in (session-based)
-        from django.contrib.auth import login
-        login(request, user)
-        
-        return Response({
-            'user_id': user.id,
-            'username': user.username,
-            'created': created
-        })
-
-
-class WhoAmIView(APIView):
-    """
-    GET /api/auth/whoami/
-    
-    Returns current authenticated user info.
-    """
-    permission_classes = [permissions.AllowAny]
-    
-    def get(self, request):
-        if request.user.is_authenticated:
-            return Response({
-                'authenticated': True,
-                'user_id': request.user.id,
-                'username': request.user.username
-            })
-        return Response({
-            'authenticated': False,
-            'user_id': None,
-            'username': None
-        })

@@ -6,6 +6,7 @@ import { formatDistanceToNow } from '../utils';
  * Comment Component
  * 
  * RECURSIVE RENDERING for nested comments.
+ * Auth-free demo mode: All actions always enabled.
  * 
  * Each Comment receives a 'node' with structure:
  * {
@@ -20,7 +21,7 @@ import { formatDistanceToNow } from '../utils';
  */
 const MAX_VISUAL_DEPTH = 6;
 
-function Comment({ node, postId, user, onCommentAdded, depth = 0 }) {
+function Comment({ node, postId, onCommentAdded, depth = 0 }) {
   const { comment, replies } = node;
   const [likeLoading, setLikeLoading] = useState(false);
   const [showReplyForm, setShowReplyForm] = useState(false);
@@ -46,7 +47,7 @@ function Comment({ node, postId, user, onCommentAdded, depth = 0 }) {
   const borderColor = borderColors[visualDepth % borderColors.length];
 
   const handleLike = async () => {
-    if (!user || likeLoading) return;
+    if (likeLoading) return;
     
     setLikeLoading(true);
     try {
@@ -109,7 +110,7 @@ function Comment({ node, postId, user, onCommentAdded, depth = 0 }) {
         <div className="flex items-center gap-3 text-sm">
           <button
             onClick={handleLike}
-            disabled={!user || likeLoading}
+            disabled={likeLoading}
             className={`flex items-center gap-1 px-2 py-1 rounded transition-colors ${
               isLiked
                 ? 'text-red-400'
@@ -120,14 +121,12 @@ function Comment({ node, postId, user, onCommentAdded, depth = 0 }) {
             <span>{localLikeCount}</span>
           </button>
           
-          {user && (
-            <button
-              onClick={() => setShowReplyForm(!showReplyForm)}
-              className="text-gray-400 hover:text-gray-200 transition-colors"
-            >
-              Reply
-            </button>
-          )}
+          <button
+            onClick={() => setShowReplyForm(!showReplyForm)}
+            className="text-gray-400 hover:text-gray-200 transition-colors"
+          >
+            Reply
+          </button>
         </div>
 
         {/* Reply Form */}
@@ -168,7 +167,6 @@ function Comment({ node, postId, user, onCommentAdded, depth = 0 }) {
               key={replyNode.comment.id}
               node={replyNode}
               postId={postId}
-              user={user}
               onCommentAdded={onCommentAdded}
               depth={depth + 1}
             />

@@ -35,7 +35,8 @@ MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
+    # CSRF disabled - using single demo user, no auth required
+    # 'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
@@ -97,27 +98,35 @@ STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # DRF Configuration
+# NOTE: Authentication disabled - using single demo user for simplicity
+# All mutating actions use the 'demo' user automatically
 REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.CursorPagination',
     'PAGE_SIZE': 20,
     # Using cursor pagination for feed - more efficient for real-time data
     # Trade-off: Can't jump to arbitrary pages, but O(1) vs O(n) offset
+    'DEFAULT_AUTHENTICATION_CLASSES': [],  # No auth required
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.AllowAny',  # All endpoints public
+    ],
     'DEFAULT_THROTTLE_CLASSES': [
         'rest_framework.throttling.AnonRateThrottle',
-        'rest_framework.throttling.UserRateThrottle'
     ],
     'DEFAULT_THROTTLE_RATES': {
-        'anon': '100/hour',
-        'user': '1000/hour'
+        'anon': '1000/hour',  # Higher limit for demo
     },
     'EXCEPTION_HANDLER': 'feed.exceptions.custom_exception_handler',
 }
 
-# CORS for frontend
+# CORS for frontend - allow all in development
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
+    "http://localhost:3001",
     "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
 ]
+CORS_ALLOW_ALL_ORIGINS = True  # For development only
+CORS_ALLOW_CREDENTIALS = True
 
 # Logging for debugging queries in development
 if DEBUG:

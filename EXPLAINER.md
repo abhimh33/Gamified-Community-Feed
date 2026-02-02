@@ -318,3 +318,50 @@ except IntegrityError:
 5. **Async Events**: Celery for karma events (don't block response)
 6. **Monitoring**: Track query times, error rates
 7. **Full-text Search**: PostgreSQL tsvector for post search
+
+---
+
+## 7. Minimal Authentication Decision
+
+### The Problem
+
+The exercise focuses on backend architecture: N+1 prevention, concurrent likes, karma aggregation, leaderboard queries. Adding full JWT/session auth would:
+- Add 200+ lines of auth boilerplate
+- Require token refresh logic
+- Obscure the core algorithmic work being demonstrated
+
+### Solution: Single Demo User
+
+**Backend:**
+```python
+# Auto-created on startup in apps.py
+def _ensure_demo_user(sender, **kwargs):
+    User.objects.get_or_create(username='demo', defaults={'email': 'demo@example.com'})
+
+# All views use this helper
+def get_demo_user():
+    return User.objects.get(username='demo')
+```
+
+**Configuration:**
+```python
+# settings.py - Disabled auth complexity
+MIDDLEWARE = [
+    # 'django.middleware.csrf.CsrfViewMiddleware',  # Disabled
+]
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [],  # No auth required
+    'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.AllowAny'],
+}
+```
+
+**What This Proves:**
+- ✅ All core features work end-to-end
+- ✅ Unique constraints prevent duplicate likes (even without user sessions)
+- ✅ Karma events record correct recipient
+- ✅ Leaderboard query remains efficient
+- ✅ Database integrity maintained
+
+**Production Path:**
+To add real auth, swap `get_demo_user()` for `request.user` and re-enable middleware. All business logic remains unchanged.

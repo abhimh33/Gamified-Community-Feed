@@ -8,8 +8,10 @@ import Comment from './Comment';
  * 
  * Displays full post with nested comment tree.
  * Comments are rendered recursively.
+ * 
+ * Auth-free demo mode: All actions always enabled.
  */
-function PostDetail({ postId, onBack, user }) {
+function PostDetail({ postId, onBack }) {
   const [post, setPost] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -17,10 +19,6 @@ function PostDetail({ postId, onBack, user }) {
   const [showReplyForm, setShowReplyForm] = useState(false);
   const [replyContent, setReplyContent] = useState('');
   const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    loadPost();
-  }, [postId]);
 
   const loadPost = async () => {
     try {
@@ -35,8 +33,13 @@ function PostDetail({ postId, onBack, user }) {
     }
   };
 
+  useEffect(() => {
+    loadPost();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [postId]);
+
   const handleLikePost = async () => {
-    if (!user || likeLoading) return;
+    if (likeLoading) return;
     
     /**
      * OPTIMISTIC UI TRADE-OFF:
@@ -59,7 +62,7 @@ function PostDetail({ postId, onBack, user }) {
     
     setLikeLoading(true);
     try {
-      const result = await toggleLike('post', postId);
+      await toggleLike('post', postId);
       // Reload post to get accurate like count
       await loadPost();
     } catch (err) {
@@ -147,7 +150,7 @@ function PostDetail({ postId, onBack, user }) {
         <div className="flex items-center gap-4 pt-4 border-t border-gray-700">
           <button
             onClick={handleLikePost}
-            disabled={!user || likeLoading}
+            disabled={likeLoading}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
               post.user_liked
                 ? 'bg-red-600 text-white'
@@ -158,15 +161,13 @@ function PostDetail({ postId, onBack, user }) {
             <span>{post.like_count}</span>
           </button>
           
-          {user && (
-            <button
-              onClick={() => setShowReplyForm(!showReplyForm)}
-              className="flex items-center gap-2 px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-gray-300"
-            >
-              <span>💬</span>
-              <span>Reply</span>
-            </button>
-          )}
+          <button
+            onClick={() => setShowReplyForm(!showReplyForm)}
+            className="flex items-center gap-2 px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-gray-300"
+          >
+            <span>💬</span>
+            <span>Reply</span>
+          </button>
           
           <span className="text-gray-400 text-sm">
             {post.comment_count} comments
@@ -220,7 +221,6 @@ function PostDetail({ postId, onBack, user }) {
                 key={node.comment.id}
                 node={node}
                 postId={postId}
-                user={user}
                 onCommentAdded={loadPost}
                 depth={0}
               />

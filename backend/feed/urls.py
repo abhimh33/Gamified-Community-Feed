@@ -1,5 +1,6 @@
 """
 Feed App URL Configuration
+(Auth-free demo mode - all actions use demo user)
 """
 from django.urls import path
 from .views import (
@@ -11,8 +12,6 @@ from .views import (
     LikePostView,
     LikeCommentView,
     LeaderboardView,
-    MockAuthView,
-    WhoAmIView
 )
 
 urlpatterns = [
@@ -33,8 +32,4 @@ urlpatterns = [
     
     # Leaderboard
     path('leaderboard/', LeaderboardView.as_view(), name='leaderboard'),
-    
-    # Auth (development)
-    path('auth/mock-login/', MockAuthView.as_view(), name='mock-login'),
-    path('auth/whoami/', WhoAmIView.as_view(), name='whoami'),
 ]

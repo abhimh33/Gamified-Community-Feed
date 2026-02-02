@@ -1,36 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import Feed from './components/Feed';
 import PostDetail from './components/PostDetail';
 import Leaderboard from './components/Leaderboard';
 import CreatePost from './components/CreatePost';
-import AuthBar from './components/AuthBar';
-import { whoAmI } from './api';
 
 /**
  * Main App Component
  * 
- * Simple routing without react-router for prototype simplicity.
+ * Auth-free demo mode: All actions use server-side demo user.
+ * 
  * State:
  * - view: 'feed' | 'post'
  * - selectedPostId: number | null
- * - user: current user info
  */
 function App() {
   const [view, setView] = useState('feed');
   const [selectedPostId, setSelectedPostId] = useState(null);
-  const [user, setUser] = useState(null);
   const [showCreatePost, setShowCreatePost] = useState(false);
-
-  // Check if user is logged in on mount
-  useEffect(() => {
-    whoAmI()
-      .then(data => {
-        if (data.authenticated) {
-          setUser(data);
-        }
-      })
-      .catch(console.error);
-  }, []);
 
   const handlePostClick = (postId) => {
     setSelectedPostId(postId);
@@ -59,7 +45,7 @@ function App() {
           >
             🔥 KarmaFeed
           </h1>
-          <AuthBar user={user} onUserChange={setUser} />
+          <span className="text-gray-400 text-sm">Demo Mode (all actions as "demo" user)</span>
         </div>
       </header>
 
@@ -70,15 +56,13 @@ function App() {
           <div className="lg:col-span-3">
             {view === 'feed' && (
               <>
-                {/* Create Post Button */}
-                {user && (
-                  <button
-                    onClick={() => setShowCreatePost(true)}
-                    className="w-full mb-4 bg-orange-600 hover:bg-orange-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors"
-                  >
-                    + Create Post
-                  </button>
-                )}
+                {/* Create Post Button - always visible in demo mode */}
+                <button
+                  onClick={() => setShowCreatePost(true)}
+                  className="w-full mb-4 bg-orange-600 hover:bg-orange-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors"
+                >
+                  + Create Post
+                </button>
                 
                 {/* Create Post Modal */}
                 {showCreatePost && (
@@ -97,7 +81,6 @@ function App() {
               <PostDetail 
                 postId={selectedPostId} 
                 onBack={handleBackToFeed}
-                user={user}
               />
             )}
           </div>
