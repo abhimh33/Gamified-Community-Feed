@@ -1,20 +1,33 @@
 import React, { useState } from 'react';
-import { createPost, ApiValidationError } from '../api';
+import { createPost } from '../api';
 
 /**
  * CreatePost Component
  * 
  * Modal form for creating new posts.
- * Handles DRF validation errors with field-level display.
+ * 
+ * ERROR HANDLING STRATEGY:
+ * - Uses try/catch but NEVER silently swallows errors
+ * - Validation errors (HTTP 400): Display per-field under inputs
+ * - Network/other errors: Display in general error banner
+ * - Errors clear when user edits the corresponding field
+ * 
+ * ERROR STATE STRUCTURE:
+ * {
+ *   title: "Error message for title field",
+ *   content: "Error message for content field"
+ * }
  */
 function CreatePost({ onClose, onSuccess }) {
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [submitting, setSubmitting] = useState(false);
   
-  // Field-level errors: { title: [...], content: [...] }
+  // Field-level errors: { title: "msg", content: "msg" }
+  // We flatten DRF's array format to single string for display
   const [fieldErrors, setFieldErrors] = useState({});
-  // General error (network issues, etc.)
+  
+  // General error (network issues, unexpected errors)
   const [generalError, setGeneralError] = useState(null);
 
   /**
@@ -22,6 +35,7 @@ function CreatePost({ onClose, onSuccess }) {
    */
   const handleTitleChange = (e) => {
     setTitle(e.target.value);
+    // Clear title error immediately when user edits
     if (fieldErrors.title) {
       setFieldErrors(prev => ({ ...prev, title: null }));
     }
@@ -30,53 +44,91 @@ function CreatePost({ onClose, onSuccess }) {
 
   const handleContentChange = (e) => {
     setContent(e.target.value);
+    // Clear content error immediately when user edits
     if (fieldErrors.content) {
       setFieldErrors(prev => ({ ...prev, content: null }));
     }
     if (generalError) setGeneralError(null);
   };
 
+  /**
+   * Parse DRF validation errors into flat field error state
+   * 
+   * Input (DRF format): 
+   *   { "title": ["Error 1", "Error 2"], "content": ["Error 3"] }
+   * 
+   * Output (our format):
+   *   { title: "Error 1", content: "Error 3" }
+   * 
+   * We take only the first error per field for cleaner UI.
+   */
+  const parseFieldErrors = (drfErrors) => {
+    const parsed = {};
+    for (const [field, messages] of Object.entries(drfErrors)) {
+      if (Array.isArray(messages) && messages.length > 0) {
+        parsed[field] = messages[0]; // First error only
+      } else if (typeof messages === 'string') {
+        parsed[field] = messages;
+      }
+    }
+    return parsed;
+  };
+
+  /**
+   * SUBMIT HANDLER - Explicit error handling, no silent failures
+   * 
+   * Flow:
+   * 1. Send POST to /api/posts/
+   * 2. On success (201): Clear form, call onSuccess
+   * 3. On validation error (400): Parse and display field errors
+   * 4. On other error: Display general error message
+   */
   const handleSubmit = async (e) => {
     e.preventDefault();
     
-    if (!title.trim() || !content.trim()) return;
+    // Client-side validation (quick fail)
+    if (!title.trim() || !content.trim()) {
+      return; // Button is disabled anyway, this is a safety check
+    }
     
     setSubmitting(true);
     setFieldErrors({});
     setGeneralError(null);
     
     try {
+      // Attempt to create post
       await createPost(title.trim(), content.trim());
+      
+      // SUCCESS: Post created (HTTP 201)
+      // Clear form and notify parent
+      setTitle('');
+      setContent('');
       onSuccess();
+      
     } catch (err) {
-      if (err instanceof ApiValidationError) {
-        // DRF validation errors - display per-field
-        setFieldErrors(err.fieldErrors);
+      // FAILURE: Handle error explicitly
+      console.error('[CreatePost] Submit error:', err);
+      
+      // Check if this is a validation error (has fieldErrors property)
+      if (err.isValidationError && err.fieldErrors) {
+        // HTTP 400 - Validation error from DRF
+        const parsed = parseFieldErrors(err.fieldErrors);
+        setFieldErrors(parsed);
+        
+        // Also handle non_field_errors if present
+        if (err.fieldErrors.non_field_errors) {
+          const nonFieldMsg = Array.isArray(err.fieldErrors.non_field_errors)
+            ? err.fieldErrors.non_field_errors[0]
+            : err.fieldErrors.non_field_errors;
+          setGeneralError(nonFieldMsg);
+        }
       } else {
-        // Network or other errors
-        setGeneralError(err.message);
+        // Network error, 500, or other unexpected error
+        setGeneralError(err.message || 'An unexpected error occurred');
       }
     } finally {
       setSubmitting(false);
     }
-  };
-
-  /**
-   * Render error messages for a field
-   * DRF returns arrays: ["Error 1", "Error 2"]
-   */
-  const renderFieldErrors = (errors) => {
-    if (!errors || errors.length === 0) return null;
-    
-    return (
-      <div className="mt-1 space-y-1">
-        {errors.map((msg, idx) => (
-          <p key={idx} className="text-red-400 text-sm">
-            {msg}
-          </p>
-        ))}
-      </div>
-    );
   };
 
   return (
@@ -93,7 +145,7 @@ function CreatePost({ onClose, onSuccess }) {
           Create Post
         </h2>
         
-        {/* General error (network issues, etc.) */}
+        {/* General error banner (network issues, non_field_errors) */}
         {generalError && (
           <div className="mb-4 p-3 bg-red-900/50 border border-red-700 rounded text-red-200 text-sm">
             {generalError}
@@ -120,7 +172,10 @@ function CreatePost({ onClose, onSuccess }) {
             />
             <div className="flex justify-between items-start mt-1">
               <div className="flex-1">
-                {renderFieldErrors(fieldErrors.title)}
+                {/* Title error - shown as readable text, not JSON */}
+                {fieldErrors.title && (
+                  <p className="text-red-400 text-sm">{fieldErrors.title}</p>
+                )}
               </div>
               <span className="text-xs text-gray-500 ml-2">
                 {title.length}/300
@@ -144,15 +199,11 @@ function CreatePost({ onClose, onSuccess }) {
               }`}
               rows={6}
             />
-            {renderFieldErrors(fieldErrors.content)}
+            {/* Content error - shown as readable text, not JSON */}
+            {fieldErrors.content && (
+              <p className="text-red-400 text-sm mt-1">{fieldErrors.content}</p>
+            )}
           </div>
-          
-          {/* Non-field errors (e.g., "non_field_errors" from DRF) */}
-          {fieldErrors.non_field_errors && (
-            <div className="mb-4">
-              {renderFieldErrors(fieldErrors.non_field_errors)}
-            </div>
-          )}
           
           <div className="flex justify-end gap-3">
             <button

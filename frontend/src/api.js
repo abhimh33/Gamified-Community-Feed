@@ -15,12 +15,19 @@ export class ApiValidationError extends Error {
   constructor(fieldErrors, message = 'Validation failed') {
     super(message);
     this.name = 'ApiValidationError';
+    this.isValidationError = true; // Reliable flag (instanceof can fail across bundles)
     this.fieldErrors = fieldErrors; // { field: [errors], ... }
   }
 }
 
 /**
  * Make an API request with proper headers and error handling
+ * 
+ * IMPORTANT: This function ALWAYS throws on non-2xx responses.
+ * - HTTP 400: throws ApiValidationError with field-level errors
+ * - Other errors: throws generic Error
+ * 
+ * Callers MUST handle these errors explicitly.
  */
 async function apiRequest(endpoint, options = {}) {
   const url = `${API_BASE}${endpoint}`;
@@ -48,13 +55,20 @@ async function apiRequest(endpoint, options = {}) {
   
   const data = await response.json();
   
+  // CRITICAL: Always check response.ok and throw appropriate error
   if (!response.ok) {
-    // Handle DRF validation errors (HTTP 400)
+    // HTTP 400 = Validation error from DRF
     // DRF returns: { "field": ["error1", "error2"], ... }
-    if (response.status === 400 && typeof data === 'object') {
-      throw new ApiValidationError(data, 'Validation failed');
+    if (response.status === 400 && data && typeof data === 'object') {
+      const validationError = new ApiValidationError(data, 'Validation failed');
+      console.error('[API] Validation error:', data); // Debug visibility
+      throw validationError;
     }
-    throw new Error(data.error || data.detail || `HTTP ${response.status}`);
+    
+    // Other errors (401, 403, 404, 500, etc.)
+    const errorMessage = data.error || data.detail || `HTTP ${response.status}`;
+    console.error('[API] Error:', errorMessage); // Debug visibility
+    throw new Error(errorMessage);
   }
   
   return data;
