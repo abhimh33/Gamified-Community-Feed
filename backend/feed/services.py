@@ -124,24 +124,20 @@ def unlike_post(user: User, post_id: int) -> LikeResult:
     """
     Remove a like from a post.
     
-    NOTE ON KARMA:
-    We do NOT create negative karma events on unlike.
+    KARMA TRACKING:
+    Creates a negative KarmaEvent (-5 karma) to maintain karma sync.
+    This ensures like/unlike/re-like doesn't double karma.
     
-    Trade-off Discussion:
-    - Option A: Create negative KarmaEvent (-5 karma)
-      - Pros: Accurate karma tracking
-      - Cons: Gaming potential (like/unlike spam)
-    
-    - Option B: Don't track unlike karma (our choice)
-      - Pros: Simpler, no gaming
-      - Cons: Karma slightly inflated over time
-    
-    For a 24-hour leaderboard, this is acceptable because:
-    - Recent likes still count
-    - Unlike just doesn't remove the karma event
-    - Could add rate limiting for like/unlike if gaming becomes issue
+    ANTI-GAMING:
+    Rate limiting should be added for production to prevent
+    like/unlike spam attacks on karma system.
     """
     content_type = ContentType.objects.get_for_model(Post)
+    
+    try:
+        post = Post.objects.select_related('author').get(id=post_id)
+    except Post.DoesNotExist:
+        return LikeResult(success=False, action='already_removed')
     
     with transaction.atomic():
         deleted_count, _ = Like.objects.filter(
@@ -151,9 +147,25 @@ def unlike_post(user: User, post_id: int) -> LikeResult:
         ).delete()
         
         if deleted_count > 0:
+            # Create negative karma event to reverse the original karma
+            # IMPORTANT: Only if the post author is not the user (matching like logic)
+            if post.author_id != user.id:
+                KarmaEvent.objects.create(
+                    recipient=post.author,
+                    actor=user,
+                    event_type=KarmaEvent.EventType.POST_UNLIKED,
+                    karma_delta=-KARMA_POST_LIKE,
+                    content_type=content_type,
+                    object_id=post_id
+                )
+            
             # Update denormalized counter
             Post.objects.filter(id=post_id).update(like_count=F('like_count') - 1)
-            return LikeResult(success=True, action='removed')
+            return LikeResult(
+                success=True, 
+                action='removed',
+                karma_delta=-KARMA_POST_LIKE if post.author_id != user.id else 0
+            )
         else:
             return LikeResult(success=False, action='already_removed')
 
@@ -208,8 +220,17 @@ def like_comment(user: User, comment_id: int) -> LikeResult:
 
 
 def unlike_comment(user: User, comment_id: int) -> LikeResult:
-    """Remove a like from a comment."""
+    """
+    Remove a like from a comment.
+    
+    Creates negative karma event to maintain karma sync.
+    """
     content_type = ContentType.objects.get_for_model(Comment)
+    
+    try:
+        comment = Comment.objects.select_related('author').get(id=comment_id)
+    except Comment.DoesNotExist:
+        return LikeResult(success=False, action='already_removed')
     
     with transaction.atomic():
         deleted_count, _ = Like.objects.filter(
@@ -219,8 +240,23 @@ def unlike_comment(user: User, comment_id: int) -> LikeResult:
         ).delete()
         
         if deleted_count > 0:
+            # Create negative karma event
+            if comment.author_id != user.id:
+                KarmaEvent.objects.create(
+                    recipient=comment.author,
+                    actor=user,
+                    event_type=KarmaEvent.EventType.COMMENT_UNLIKED,
+                    karma_delta=-KARMA_COMMENT_LIKE,
+                    content_type=content_type,
+                    object_id=comment_id
+                )
+            
             Comment.objects.filter(id=comment_id).update(like_count=F('like_count') - 1)
-            return LikeResult(success=True, action='removed')
+            return LikeResult(
+                success=True, 
+                action='removed',
+                karma_delta=-KARMA_COMMENT_LIKE if comment.author_id != user.id else 0
+            )
         else:
             return LikeResult(success=False, action='already_removed')
 

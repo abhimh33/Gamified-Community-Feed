@@ -228,7 +228,8 @@ class KarmaEvent(models.Model):
     class EventType(models.TextChoices):
         POST_LIKED = 'POST_LIKED', 'Post Liked'
         COMMENT_LIKED = 'COMMENT_LIKED', 'Comment Liked'
-        # Future: POST_UNLIKED, COMMENT_UNLIKED (would be negative karma)
+        POST_UNLIKED = 'POST_UNLIKED', 'Post Unliked'
+        COMMENT_UNLIKED = 'COMMENT_UNLIKED', 'Comment Unliked'
     
     # Who receives the karma (content author)
     recipient = models.ForeignKey(
