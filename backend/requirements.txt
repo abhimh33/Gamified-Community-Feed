@@ -1,0 +1,13 @@
+# Django & DRF
+Django>=4.2,<5.0
+djangorestframework>=3.14.0
+django-cors-headers>=4.3.0
+
+# PostgreSQL
+psycopg2-binary>=2.9.9
+
+# Environment
+python-dotenv>=1.0.0
+
+# For development
+django-debug-toolbar>=4.2.0

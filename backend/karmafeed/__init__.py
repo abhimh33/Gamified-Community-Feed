@@ -1,0 +1,3 @@
+"""
+KarmaFeed package init
+"""
