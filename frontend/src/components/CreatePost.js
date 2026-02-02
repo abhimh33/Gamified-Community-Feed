@@ -1,22 +1,15 @@
 import React, { useState } from 'react';
-import { createPost } from '../api';
 
 /**
  * CreatePost Component
  * 
- * Modal form for creating new posts.
+ * CRITICAL: This component uses DIRECT FETCH with explicit status code handling.
+ * NO try/catch. NO early returns. NO error swallowing.
  * 
- * ERROR HANDLING STRATEGY:
- * - Uses try/catch but NEVER silently swallows errors
- * - Validation errors (HTTP 400): Display per-field under inputs
- * - Network/other errors: Display in general error banner
- * - Errors clear when user edits the corresponding field
- * 
- * ERROR STATE STRUCTURE:
- * {
- *   title: "Error message for title field",
- *   content: "Error message for content field"
- * }
+ * Control Flow:
+ *   1. fetch() → always get response
+ *   2. response.json() → always parse body
+ *   3. Check status codes explicitly → always handle result
  */
 function CreatePost({ onClose, onSuccess }) {
   const [title, setTitle] = useState('');
@@ -24,7 +17,6 @@ function CreatePost({ onClose, onSuccess }) {
   const [submitting, setSubmitting] = useState(false);
   
   // Field-level errors: { title: "msg", content: "msg" }
-  // We flatten DRF's array format to single string for display
   const [fieldErrors, setFieldErrors] = useState({});
   
   // General error (network issues, unexpected errors)
@@ -35,7 +27,6 @@ function CreatePost({ onClose, onSuccess }) {
    */
   const handleTitleChange = (e) => {
     setTitle(e.target.value);
-    // Clear title error immediately when user edits
     if (fieldErrors.title) {
       setFieldErrors(prev => ({ ...prev, title: null }));
     }
@@ -44,7 +35,6 @@ function CreatePost({ onClose, onSuccess }) {
 
   const handleContentChange = (e) => {
     setContent(e.target.value);
-    // Clear content error immediately when user edits
     if (fieldErrors.content) {
       setFieldErrors(prev => ({ ...prev, content: null }));
     }
@@ -52,81 +42,69 @@ function CreatePost({ onClose, onSuccess }) {
   };
 
   /**
-   * Parse DRF validation errors into flat field error state
+   * SUBMIT HANDLER
    * 
-   * Input (DRF format): 
-   *   { "title": ["Error 1", "Error 2"], "content": ["Error 3"] }
+   * STRUCTURE (EXACTLY AS REQUIRED):
+   *   const response = await fetch(...)
+   *   const data = await response.json()
+   *   if (response.status === 201) { success }
+   *   else if (response.status === 400) { field errors }
+   *   else { generic error }
    * 
-   * Output (our format):
-   *   { title: "Error 1", content: "Error 3" }
-   * 
-   * We take only the first error per field for cleaner UI.
-   */
-  const parseFieldErrors = (drfErrors) => {
-    const parsed = {};
-    for (const [field, messages] of Object.entries(drfErrors)) {
-      if (Array.isArray(messages) && messages.length > 0) {
-        parsed[field] = messages[0]; // First error only
-      } else if (typeof messages === 'string') {
-        parsed[field] = messages;
-      }
-    }
-    return parsed;
-  };
-
-  /**
-   * SUBMIT HANDLER - Explicit error handling, no silent failures
-   * 
-   * Flow:
-   * 1. Send POST to /api/posts/
-   * 2. On success (201): Clear form, call onSuccess
-   * 3. On validation error (400): Parse and display field errors
-   * 4. On other error: Display general error message
+   * NO try/catch. NO early returns. NO error swallowing.
    */
   const handleSubmit = async (e) => {
     e.preventDefault();
     
-    // Client-side validation (quick fail)
     if (!title.trim() || !content.trim()) {
-      return; // Button is disabled anyway, this is a safety check
+      return;
     }
     
     setSubmitting(true);
     setFieldErrors({});
     setGeneralError(null);
     
-    try {
-      // Attempt to create post
-      await createPost(title.trim(), content.trim());
-      
-      // SUCCESS: Post created (HTTP 201)
-      // Clear form and notify parent
+    // Step 1: Make the fetch request
+    const response = await fetch('/api/posts/', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        title: title.trim(),
+        content: content.trim(),
+      }),
+    });
+    
+    // Step 2: Parse JSON body (ALWAYS, for both success and error)
+    const data = await response.json();
+    
+    // Step 3: Handle response based on status code (NO EARLY RETURNS)
+    if (response.status === 201) {
+      // SUCCESS: Post created
       setTitle('');
       setContent('');
+      setSubmitting(false);
       onSuccess();
-      
-    } catch (err) {
-      // FAILURE: Handle error explicitly
-      console.error('[CreatePost] Submit error:', err);
-      
-      // Check if this is a validation error (has fieldErrors property)
-      if (err.isValidationError && err.fieldErrors) {
-        // HTTP 400 - Validation error from DRF
-        const parsed = parseFieldErrors(err.fieldErrors);
-        setFieldErrors(parsed);
-        
-        // Also handle non_field_errors if present
-        if (err.fieldErrors.non_field_errors) {
-          const nonFieldMsg = Array.isArray(err.fieldErrors.non_field_errors)
-            ? err.fieldErrors.non_field_errors[0]
-            : err.fieldErrors.non_field_errors;
-          setGeneralError(nonFieldMsg);
+    } else if (response.status === 400) {
+      // VALIDATION ERROR: Parse field errors from DRF format
+      // Backend returns: { "error": "...", "details": { "title": ["Error 1"], "content": ["Error 2"] } }
+      // We extract from details and convert to: { title: "Error 1", content: "Error 2" }
+      const fieldData = data.details || data; // Support both wrapped and unwrapped formats
+      const parsed = {};
+      for (const [field, messages] of Object.entries(fieldData)) {
+        if (Array.isArray(messages) && messages.length > 0) {
+          parsed[field] = messages[0];
+        } else if (typeof messages === 'string') {
+          parsed[field] = messages;
         }
-      } else {
-        // Network error, 500, or other unexpected error
-        setGeneralError(err.message || 'An unexpected error occurred');
       }
-    } finally {
+      setFieldErrors(parsed);
+      setSubmitting(false);
+    } else {
+      // OTHER ERROR: 401, 403, 404, 500, etc.
+      const errorMsg = data.detail || data.error || `Server error (${response.status})`;
+      setGeneralError(errorMsg);
       setSubmitting(false);
     }
   };
@@ -145,7 +123,7 @@ function CreatePost({ onClose, onSuccess }) {
           Create Post
         </h2>
         
-        {/* General error banner (network issues, non_field_errors) */}
+        {/* General error banner */}
         {generalError && (
           <div className="mb-4 p-3 bg-red-900/50 border border-red-700 rounded text-red-200 text-sm">
             {generalError}
@@ -172,7 +150,7 @@ function CreatePost({ onClose, onSuccess }) {
             />
             <div className="flex justify-between items-start mt-1">
               <div className="flex-1">
-                {/* Title error - shown as readable text, not JSON */}
+                {/* Title error rendered directly under input */}
                 {fieldErrors.title && (
                   <p className="text-red-400 text-sm">{fieldErrors.title}</p>
                 )}
@@ -199,7 +177,7 @@ function CreatePost({ onClose, onSuccess }) {
               }`}
               rows={6}
             />
-            {/* Content error - shown as readable text, not JSON */}
+            {/* Content error rendered directly under textarea */}
             {fieldErrors.content && (
               <p className="text-red-400 text-sm mt-1">{fieldErrors.content}</p>
             )}
