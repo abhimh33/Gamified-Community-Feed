@@ -54,6 +54,9 @@ RUN useradd --create-home --shell /bin/bash appuser
 # Copy application code
 COPY --chown=appuser:appuser . .
 
+# Make startup script executable
+RUN chmod +x start.sh
+
 # Collect static files (uses whitenoise in production)
 RUN python manage.py collectstatic --no-input
 
@@ -66,15 +69,7 @@ EXPOSE 8000
 # Set default port (Render overrides with $PORT)
 ENV PORT=8000
 
-# Default command - Gunicorn with production settings
-# Uses shell form to expand $PORT variable (Render requirement)
-CMD gunicorn karmafeed.wsgi:application \
-    --bind 0.0.0.0:$PORT \
-    --workers 2 \
-    --threads 4 \
-    --worker-class gthread \
-    --worker-tmp-dir /dev/shm \
-    --access-logfile - \
-    --error-logfile - \
+# Start with startup script (runs migrations + gunicorn)
+CMD ["./start.sh"]
     --capture-output \
     --enable-stdio-inheritance
