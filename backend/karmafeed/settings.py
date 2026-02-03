@@ -168,6 +168,12 @@ FRONTEND_URL = os.getenv('FRONTEND_URL')
 if FRONTEND_URL and FRONTEND_URL not in CORS_ALLOWED_ORIGINS:
     CORS_ALLOWED_ORIGINS.append(FRONTEND_URL)
 
+# Allow Vercel preview deployments (they have unique URLs)
+# Pattern: *.vercel.app
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https://.*\.vercel\.app$",
+]
+
 # Allow all origins in development only
 CORS_ALLOW_ALL_ORIGINS = DEBUG
 CORS_ALLOW_CREDENTIALS = True
