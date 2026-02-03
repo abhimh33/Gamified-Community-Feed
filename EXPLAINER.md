@@ -289,6 +289,49 @@ const response = await fetch(`${API_BASE}/api/posts/`, {
 
 ---
 
+## 7. Testing (Bonus)
+
+### Meaningful Test: 24-Hour Leaderboard Window
+
+This test verifies the critical requirement that only karma from the last 24 hours counts toward the leaderboard:
+
+```python
+def test_old_karma_not_counted(self):
+    """
+    Karma older than 24 hours should not count.
+    This is THE critical test for the time window requirement.
+    """
+    # Create a karma event 25 hours ago (outside the window)
+    old_time = timezone.now() - timedelta(hours=25)
+    
+    KarmaEvent.objects.create(
+        recipient=self.user1,
+        actor=self.liker,
+        event_type=KarmaEvent.EventType.POST_LIKED,
+        karma_delta=5,
+        content_type=post_ct,
+        object_id=self.post1.id,
+        created_at=old_time  # 25 hours ago
+    )
+    
+    # Old karma should NOT be counted in 24h window
+    karma = get_user_karma(self.user1.id, hours=24)
+    self.assertEqual(karma, 0)
+    
+    # But should be counted with larger window
+    karma_48h = get_user_karma(self.user1.id, hours=48)
+    self.assertEqual(karma_48h, 5)
+```
+
+### Run Tests
+
+```bash
+cd backend
+python manage.py test feed.tests
+```
+
+---
+
 ## Summary
 
 | Concept | Decision | Rationale |
@@ -298,3 +341,4 @@ const response = await fetch(`${API_BASE}/api/posts/`, {
 | Like Safety | Unique constraint + IntegrityError | Database-level atomicity |
 | Karma | Event sourcing | Time-windowed leaderboard, audit trail |
 | Deployment | Docker + Render + Vercel | Zero-config scaling, managed PostgreSQL |
+| Testing | Time-window verification | Ensures 24h leaderboard correctness |
