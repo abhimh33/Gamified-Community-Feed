@@ -1,56 +1,64 @@
+# =============================================================================
+# KarmaFeed - Docker Compose for Local Development
+# =============================================================================
+# Usage:
+#   docker-compose up --build     # Build and start
+#   docker-compose down           # Stop and remove containers
+#   docker-compose logs -f        # Follow logs
+#
+# This is for LOCAL DEVELOPMENT ONLY.
+# For production on Render, use the Dockerfile directly.
+# =============================================================================
+
 version: '3.8'
 
 services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL Database
+  # ---------------------------------------------------------------------------
   db:
-    image: postgres:15
+    image: postgres:15-alpine
     environment:
       POSTGRES_DB: karmafeed
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: karmafeed
+      POSTGRES_PASSWORD: karmafeed
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "5433:5432"  # Use 5433 to avoid conflict with local postgres
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U karmafeed -d karmafeed"]
       interval: 5s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
+  # ---------------------------------------------------------------------------
+  # Django Backend (Production-ready with Gunicorn)
+  # ---------------------------------------------------------------------------
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     environment:
+      # Use DATABASE_URL format for dj-database-url
+      - DATABASE_URL=postgres://karmafeed:karmafeed@db:5432/karmafeed
+      - DJANGO_SECRET_KEY=docker-dev-secret-key-change-in-production
       - DEBUG=True
-      - DB_HOST=db
-      - DB_NAME=karmafeed
-      - DB_USER=postgres
-      - DB_PASSWORD=postgres
-    volumes:
-      - ./backend:/app
+      - ALLOWED_HOSTS=localhost,127.0.0.1
+      - FRONTEND_URL=http://localhost:3000
     ports:
       - "8000:8000"
     depends_on:
       db:
         condition: service_healthy
+    # Run migrations, create demo user, then start Gunicorn
     command: >
       sh -c "python manage.py migrate &&
-             python manage.py runserver 0.0.0.0:8000"
-
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    volumes:
-      - ./frontend/src:/app/src
-      - ./frontend/public:/app/public
-    ports:
-      - "3000:3000"
-    environment:
-      - CHOKIDAR_USEPOLLING=true
-    depends_on:
-      - backend
+             python manage.py shell -c \"from django.contrib.auth.models import User; User.objects.get_or_create(username='demo', defaults={'email': 'demo@karmafeed.local'})\" &&
+             gunicorn karmafeed.wsgi:application --bind 0.0.0.0:8000 --workers 2 --threads 4 --worker-class gthread --access-logfile - --error-logfile -"
+    restart: unless-stopped
 
 volumes:
   postgres_data:
+    driver: local
