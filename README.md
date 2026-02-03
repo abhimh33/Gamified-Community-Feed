@@ -73,9 +73,17 @@ The app will be available at http://localhost:3000
 
 ## 🐳 Docker Setup (Alternative)
 
+Run the backend with Docker Compose (includes PostgreSQL):
+
 ```powershell
+# Build and start containers
 docker-compose up --build
+
+# API available at http://localhost:8000
+# Demo user: testuser / testpass
 ```
+
+For production (Render), the Dockerfile uses multi-stage builds with Gunicorn (2 workers, 4 threads).
 
 ## 📡 API Endpoints
 
