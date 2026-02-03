@@ -71,5 +71,3 @@ ENV PORT=8000
 
 # Start with startup script (runs migrations + gunicorn)
 CMD ["./start.sh"]
-    --capture-output \
-    --enable-stdio-inheritance
