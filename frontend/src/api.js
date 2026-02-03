@@ -5,7 +5,8 @@
  * No CSRF, no sessions, no cookies required.
  */
 
-const API_BASE = '/api';
+// Use environment variable in production, fallback to /api for local development (proxy)
+const API_BASE = process.env.REACT_APP_API_URL || '/api';
 
 /**
  * Custom error class for API validation errors
