@@ -155,9 +155,17 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:3001",
 ]
 
-# Add production frontend URL from environment
+# Add production frontend URL from environment (supports multiple comma-separated origins)
+CORS_ALLOWED_ORIGINS_ENV = os.getenv('CORS_ALLOWED_ORIGINS', '')
+if CORS_ALLOWED_ORIGINS_ENV:
+    for origin in CORS_ALLOWED_ORIGINS_ENV.split(','):
+        origin = origin.strip()
+        if origin and origin not in CORS_ALLOWED_ORIGINS:
+            CORS_ALLOWED_ORIGINS.append(origin)
+
+# Also support FRONTEND_URL for backwards compatibility
 FRONTEND_URL = os.getenv('FRONTEND_URL')
-if FRONTEND_URL:
+if FRONTEND_URL and FRONTEND_URL not in CORS_ALLOWED_ORIGINS:
     CORS_ALLOWED_ORIGINS.append(FRONTEND_URL)
 
 # Allow all origins in development only
