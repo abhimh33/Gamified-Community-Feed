@@ -1,367 +1,300 @@
 # EXPLAINER.md
 
-Technical deep-dive answering specific architecture questions.
+Technical deep-dive into the architecture decisions behind KarmaFeed.
 
 ---
 
-## 1. Nested Comment Tree Modeling
+## 1. Comment Tree Modeling
 
-### The Problem
+### Approach: Adjacency List
 
-Reddit-style threaded comments with unlimited depth. Loading a post with 50 comments **must not** generate 50 queries.
+Each comment stores a reference to its parent via `parent_id`:
 
-### Solution: Adjacency List + Python Assembly
-
-**Database Schema:**
 ```python
 class Comment(models.Model):
-    post = models.ForeignKey(Post, ...)
-    parent = models.ForeignKey('self', null=True, ...)  # Self-referential FK
+    post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name='comments')
+    parent = models.ForeignKey('self', null=True, blank=True, on_delete=models.CASCADE, related_name='replies')
+    author = models.ForeignKey(User, on_delete=models.CASCADE)
     content = models.TextField()
-    depth = models.PositiveSmallIntegerField(default=0)  # Stored for convenience
-```
-
-**Query Strategy:**
-```python
-# QUERY 1: Fetch post
-post = Post.objects.select_related('author').get(id=post_id)
-
-# QUERY 2: Fetch ALL comments for post (single query!)
-comments = list(
-    Comment.objects
-    .filter(post_id=post_id)
-    .select_related('author')
-    .order_by('created_at')
-)
-
-# PYTHON: Build tree in O(n) single pass
-def build_comment_tree(flat_comments):
-    nodes = {c.id: {'comment': c, 'replies': []} for c in flat_comments}
-    roots = []
-    for c in flat_comments:
-        if c.parent_id is None:
-            roots.append(nodes[c.id])
-        else:
-            nodes[c.parent_id]['replies'].append(nodes[c.id])
-    return roots
-```
-
-**Total Queries: 2** (regardless of comment count or nesting depth)
-
-### Why Not Materialized Path?
-
-Storing path like `/1/5/12/` in a string field:
-- ✅ Fast ancestry queries (`WHERE path LIKE '/1/5/%'`)
-- ❌ Complex string manipulation
-- ❌ Max path length limits
-- ❌ We don't need subtree queries often
-
-### Why Not Recursive CTE?
-
-PostgreSQL's `WITH RECURSIVE` could build the tree in SQL:
-```sql
-WITH RECURSIVE comment_tree AS (
-    SELECT *, 0 as depth FROM comment WHERE parent_id IS NULL
-    UNION ALL
-    SELECT c.*, ct.depth + 1 FROM comment c
-    JOIN comment_tree ct ON c.parent_id = ct.id
-)
-SELECT * FROM comment_tree;
-```
-
-- ✅ Single query
-- ❌ Complex SQL, harder to test
-- ❌ Less portable (PostgreSQL-specific)
-- ❌ For 50-100 comments, Python assembly is <1ms
-
-**Conclusion:** Adjacency List + Python is simpler, portable, and fast enough.
-
----
-
-## 2. Leaderboard Math
-
-### Requirements
-- Top 5 users by karma in **last 24 hours only**
-- Post like = +5 karma
-- Comment like = +1 karma
-- **Cannot store daily_karma on User** (mutable counter = bad)
-
-### Solution: Event Sourcing with KarmaEvent
-
-```python
-class KarmaEvent(models.Model):
-    recipient = models.ForeignKey(User, ...)       # Who earned karma
-    event_type = models.CharField(...)             # POST_LIKED, COMMENT_LIKED
-    karma_delta = models.SmallIntegerField()       # +5 or +1
     created_at = models.DateTimeField(auto_now_add=True)
 ```
 
-### The Query
+### Why Adjacency List?
 
-```python
-# Django ORM
-leaderboard = (
-    KarmaEvent.objects
-    .filter(created_at__gte=timezone.now() - timedelta(hours=24))
-    .values('recipient_id', 'recipient__username')
-    .annotate(total_karma=Sum('karma_delta'))
-    .order_by('-total_karma')[:5]
-)
-```
+| Pattern | Pros | Cons |
+|---------|------|------|
+| **Adjacency List** ✓ | Simple schema, O(1) inserts, no tree maintenance | Recursive fetch or Python assembly |
+| Materialized Path | Single query tree fetch, subtree queries | String manipulation, recompute on move |
+| Nested Set | Fast subtree reads | Expensive writes, rebalancing required |
 
-**Generated SQL:**
-```sql
-SELECT 
-    recipient_id,
-    auth_user.username,
-    SUM(karma_delta) AS total_karma
-FROM feed_karmaevent
-JOIN auth_user ON recipient_id = auth_user.id
-WHERE created_at >= NOW() - INTERVAL '24 hours'
-GROUP BY recipient_id, auth_user.username
-ORDER BY total_karma DESC
-LIMIT 5;
-```
+For a feed app where:
+- Comments are written frequently
+- Tree depth is typically shallow (3-5 levels)
+- Full tree is always fetched per post
 
-### Index Usage
-
-```python
-# In models.py
-class Meta:
-    indexes = [
-        models.Index(fields=['created_at', 'recipient']),
-    ]
-```
-
-This composite index allows:
-1. Range scan on `created_at >= X` (efficient)
-2. Pre-sorted by `recipient` for grouping
-3. Query plan: Index Scan → HashAggregate → Sort → Limit
-
-### Why Not Store Daily Karma?
-
-```python
-# BAD: Mutable counter
-class User(models.Model):
-    daily_karma = models.IntegerField(default=0)  # ❌
-```
-
-Problems:
-1. **Race conditions**: Two concurrent likes → one lost
-2. **Time window**: When to reset? Midnight where?
-3. **Timezone hell**: UTC? User's timezone?
-4. **No history**: Can't query "leaderboard at 3pm yesterday"
-5. **Drift**: Counters can desync from reality
-
-**Event log is the source of truth.** Slight performance cost is worth correctness.
+**Adjacency List** is ideal—no overhead on writes, tree assembled in Python.
 
 ---
 
-## 3. One AI-Generated Bug & Fix
+## 2. Query Efficiency & N+1 Prevention
 
-### The Bug: Race Condition in Comment Depth Calculation
+### Problem: N+1 Query Trap
 
-**Location:** `serializers.py`, `CommentCreateSerializer.create()`
+Naive nested serializers cause one query per comment:
 
-**Original Code:**
 ```python
-def create(self, validated_data):
-    parent = validated_data.get('parent')
-    if parent:
-        validated_data['depth'] = parent.depth + 1
+# ❌ BAD: N+1 queries
+for comment in comments:
+    replies = comment.replies.all()  # Query per comment!
+```
+
+### Solution: Two-Query Assembly
+
+Fetch all comments for a post in **one query**, then assemble the tree in Python:
+
+```python
+# ✅ GOOD: O(1) queries regardless of depth
+comments = Comment.objects.filter(post=post).select_related('author').order_by('created_at')
+
+# Build lookup dictionary
+comment_map = {c.id: {**serializer(c), 'replies': []} for c in comments}
+
+# Assemble tree in single pass
+roots = []
+for c in comments:
+    if c.parent_id:
+        comment_map[c.parent_id]['replies'].append(comment_map[c.id])
     else:
-        validated_data['depth'] = 0
-    return super().create(validated_data)
+        roots.append(comment_map[c.id])
 ```
 
-**The Problem:**
+### Result
 
-When two users reply to the same parent comment simultaneously:
-1. Request A reads `parent.depth = 2`
-2. Request B reads `parent.depth = 2` 
-3. Request A creates comment with `depth = 3`
-4. Request B creates comment with `depth = 3` ✅ (Correct, no race here)
+| Depth | Naive Approach | Our Approach |
+|-------|---------------|--------------|
+| 10 comments | 11 queries | 2 queries |
+| 100 comments | 101 queries | 2 queries |
+| 1000 comments | 1001 queries | 2 queries |
 
-Wait... this is actually fine! The depth is read from the parent, not a counter.
-
-**Actual Bug (More Subtle):**
-
-The real bug is in `signals.py`:
-
-```python
-@receiver(post_delete, sender=Comment)
-def decrement_comment_count(sender, instance, **kwargs):
-    Post.objects.filter(id=instance.post_id).update(
-        comment_count=F('comment_count') - 1
-    )
-```
-
-**The Problem:**
-
-When a parent comment is deleted with `on_delete=CASCADE`, the children are also deleted. Django fires `post_delete` for **each** child. If a parent has 5 replies, `comment_count` decreases by 6 (parent + 5 children), which is correct...
-
-BUT: If the post is also deleted (`Post.objects.filter(id=instance.post_id)` returns nothing), the `update()` silently does nothing. Then when processing remaining comments, they also try to update a non-existent post.
-
-**The Fix:**
-
-```python
-@receiver(post_delete, sender=Comment)
-def decrement_comment_count(sender, instance, **kwargs):
-    # Use update() which is a no-op if post doesn't exist
-    # This is actually safe, but we should log it
-    updated = Post.objects.filter(id=instance.post_id).update(
-        comment_count=F('comment_count') - 1
-    )
-    if updated == 0:
-        # Post was deleted, all its comments are being cascade deleted
-        # This is expected, not an error
-        pass
-```
-
-**Better Fix (Don't Use Signals for Counters):**
-
-```python
-# In the view/service layer, explicitly handle counts
-def delete_comment(comment_id):
-    comment = Comment.objects.get(id=comment_id)
-    post_id = comment.post_id
-    
-    # Count how many comments will be deleted (including nested)
-    delete_count = Comment.objects.filter(
-        Q(id=comment_id) | Q(parent_id=comment_id)
-    ).count()  # Simplified - real version needs recursive count
-    
-    # Delete and update count atomically
-    with transaction.atomic():
-        comment.delete()
-        Post.objects.filter(id=post_id).update(
-            comment_count=F('comment_count') - delete_count
-        )
-```
-
-**Lesson:** Signals are convenient but hide important logic. For critical business operations (like maintaining counters), explicit is better than implicit.
+Fixed at **2 queries** for any tree size: one for comments, one for authors (via `select_related`).
 
 ---
 
-## 4. Concurrency Protection for Likes
+## 3. Concurrency & Data Integrity
 
-### The Strategy
+### Problem: Duplicate Likes
+
+Two simultaneous requests to like the same post could create duplicate like records:
+
+```
+Request A: Check if like exists → No
+Request B: Check if like exists → No
+Request A: Create like → Success
+Request B: Create like → Success (DUPLICATE!)
+```
+
+### Solution: Database Unique Constraint
 
 ```python
-def like_post(user, post_id):
+class PostLike(models.Model):
+    post = models.ForeignKey(Post, on_delete=models.CASCADE)
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['post', 'user'], name='unique_post_like')
+        ]
+```
+
+### Implementation Pattern
+
+```python
+def like_post(request, post_id):
     try:
-        with transaction.atomic():
-            # This will raise IntegrityError if like already exists
-            Like.objects.create(
-                user=user,
-                content_type=post_ct,
-                object_id=post_id
-            )
-            # Only create karma if like succeeded
-            KarmaEvent.objects.create(...)
-            
+        PostLike.objects.create(post_id=post_id, user=request.user)
+        # Award karma via event sourcing
+        KarmaEvent.objects.create(
+            user=post.author,
+            delta=5,
+            reason='post_like',
+            reference_id=post_id
+        )
+        return Response({'status': 'liked'}, status=201)
     except IntegrityError:
-        # Like already exists - not an error, just return status
-        return {'action': 'already_exists'}
+        # Constraint violation = already liked
+        return Response({'error': 'Already liked'}, status=400)
 ```
 
-### Why IntegrityError > SELECT FOR UPDATE
+### Why Not `get_or_create`?
 
-**Option A: Pessimistic Locking**
-```python
-# Check first, then create
-existing = Like.objects.select_for_update().filter(...).first()
-if not existing:
-    Like.objects.create(...)
-```
-- ❌ Can't lock a row that doesn't exist
-- ❌ Would need table-level lock
-- ❌ Reduces throughput
-
-**Option B: Optimistic (Our Choice)**
-```python
-# Just try to create, handle failure
-try:
-    Like.objects.create(...)  # Unique constraint enforced
-except IntegrityError:
-    pass  # Already liked
-```
-- ✅ No blocking
-- ✅ Database enforces uniqueness
-- ✅ Higher throughput
-- ✅ Simpler code
+- `get_or_create` still has a race window between check and create
+- Unique constraint is **atomic at the database level**
+- Cleaner error handling with explicit `IntegrityError` catch
 
 ---
 
-## 5. Performance Summary
+## 4. Karma & Leaderboard Math
 
-| Operation | Queries | Time Complexity |
-|-----------|---------|-----------------|
-| Load feed (20 posts) | 1 | O(1) with cursor |
-| Load post + 50 comments | 2 | O(n) Python assembly |
-| Like a post | 2-3 | O(1) |
-| Leaderboard | 1 | O(log n) with index |
+### Event Sourcing Pattern
 
-**Bottlenecks to Watch:**
-1. Leaderboard at scale → Add Redis cache (60s TTL)
-2. Very deep comment trees (1000+) → Paginate or limit depth
-3. High like volume → Batch karma events (trade-off: less real-time)
+Instead of storing a mutable `karma` field on User, we log immutable events:
+
+```python
+class KarmaEvent(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    delta = models.IntegerField()  # +5 for post like, +1 for comment like
+    reason = models.CharField(max_length=50)
+    reference_id = models.IntegerField(null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+```
+
+### Karma Values
+
+| Action | Karma Awarded |
+|--------|---------------|
+| Post receives a like | +5 to author |
+| Comment receives a like | +1 to author |
+
+### Leaderboard Query
+
+Top 5 users by karma earned in the last 24 hours:
+
+```python
+from django.db.models import Sum
+from django.utils import timezone
+from datetime import timedelta
+
+def get_leaderboard():
+    cutoff = timezone.now() - timedelta(hours=24)
+    
+    return (
+        KarmaEvent.objects
+        .filter(created_at__gte=cutoff)
+        .values('user__username')
+        .annotate(total_karma=Sum('delta'))
+        .order_by('-total_karma')[:5]
+    )
+```
+
+### Why Event Sourcing?
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| Mutable field | Simple reads | Lost history, concurrent update bugs |
+| **Event sourcing** ✓ | Full audit trail, time-windowed queries, no race conditions | Aggregation on read |
+
+For a leaderboard that needs **rolling 24-hour windows**, event sourcing is the natural fit.
 
 ---
 
-## 6. What I Would Add for Production
+## 5. Deployment & Docker (Bonus)
 
-1. **Rate Limiting**: Prevent like/unlike spam
-2. **Soft Deletes**: Never actually delete, just mark deleted
-3. **Read Replicas**: Route leaderboard queries to replica
-4. **Caching**: Redis for leaderboard (60s), post details (10s)
-5. **Async Events**: Celery for karma events (don't block response)
-6. **Monitoring**: Track query times, error rates
-7. **Full-text Search**: PostgreSQL tsvector for post search
+### Multi-Stage Dockerfile
+
+```dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    libpq-dev gcc && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY . .
+
+# Collect static files
+RUN python manage.py collectstatic --noinput
+
+# Run startup script
+CMD ["./start.sh"]
+```
+
+### Startup Script (`start.sh`)
+
+```bash
+#!/bin/bash
+set -e
+
+# Run migrations
+python manage.py migrate
+
+# Seed demo data if database is empty
+python manage.py shell -c "
+from feed.models import Post
+if not Post.objects.exists():
+    from django.core.management import call_command
+    call_command('seed_data')
+"
+
+# Start Gunicorn
+exec gunicorn karmafeed.wsgi:application \
+    --bind 0.0.0.0:$PORT \
+    --workers 2 \
+    --threads 4 \
+    --worker-class gthread \
+    --timeout 120
+```
+
+### Environment Variables
+
+| Variable | Purpose |
+|----------|---------|
+| `DATABASE_URL` | PostgreSQL connection string |
+| `SECRET_KEY` | Django secret key |
+| `DEBUG` | False in production |
+| `ALLOWED_HOSTS` | Comma-separated hostnames |
 
 ---
 
-## 7. Minimal Authentication Decision
+## 6. AI Audit
 
-### The Problem
+### Bug Found by AI: Hardcoded API URL in CreatePost
 
-The exercise focuses on backend architecture: N+1 prevention, concurrent likes, karma aggregation, leaderboard queries. Adding full JWT/session auth would:
-- Add 200+ lines of auth boilerplate
-- Require token refresh logic
-- Obscure the core algorithmic work being demonstrated
+**Location**: `frontend/src/components/CreatePost.js`
 
-### Solution: Single Demo User
+**Original Code (Buggy)**:
 
-**Backend:**
-```python
-# Auto-created on startup in apps.py
-def _ensure_demo_user(sender, **kwargs):
-    User.objects.get_or_create(username='demo', defaults={'email': 'demo@example.com'})
-
-# All views use this helper
-def get_demo_user():
-    return User.objects.get(username='demo')
+```javascript
+const response = await fetch('/api/posts/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(postData)
+});
 ```
 
-**Configuration:**
-```python
-# settings.py - Disabled auth complexity
-MIDDLEWARE = [
-    # 'django.middleware.csrf.CsrfViewMiddleware',  # Disabled
-]
+**Problem**: When deployed to Vercel, the frontend is served from `gamified-community-feed.vercel.app` but the API lives at `karmafeed-backend.onrender.com`. The hardcoded `/api` path causes requests to go to the wrong origin.
 
-REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': [],  # No auth required
-    'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.AllowAny'],
-}
+**Fix Applied**:
+
+```javascript
+const API_BASE = process.env.REACT_APP_API_URL || '';
+
+const response = await fetch(`${API_BASE}/api/posts/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(postData)
+});
 ```
 
-**What This Proves:**
-- ✅ All core features work end-to-end
-- ✅ Unique constraints prevent duplicate likes (even without user sessions)
-- ✅ Karma events record correct recipient
-- ✅ Leaderboard query remains efficient
-- ✅ Database integrity maintained
+**Why This Matters**: This pattern (environment-based API URL) ensures:
+- Local development works with proxy (`REACT_APP_API_URL` unset)
+- Production points to the deployed backend
+- No code changes needed between environments
 
-**Production Path:**
-To add real auth, swap `get_demo_user()` for `request.user` and re-enable middleware. All business logic remains unchanged.
+---
+
+## Summary
+
+| Concept | Decision | Rationale |
+|---------|----------|-----------|
+| Comment Tree | Adjacency List | Simple writes, Python assembly is fast enough |
+| N+1 Prevention | Two-query fetch + Python tree build | O(1) query complexity |
+| Like Safety | Unique constraint + IntegrityError | Database-level atomicity |
+| Karma | Event sourcing | Time-windowed leaderboard, audit trail |
+| Deployment | Docker + Render + Vercel | Zero-config scaling, managed PostgreSQL |

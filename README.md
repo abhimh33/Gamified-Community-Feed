@@ -1,75 +1,96 @@
 # KarmaFeed
 
-A Community Feed application with nested threaded comments, likes with karma rewards, and a real-time leaderboard.
+A gamified community feed with nested threaded comments, like-based karma rewards, and a real-time leaderboard. Users can create posts, comment with unlimited nesting depth, like content to award karma, and compete on a 24-hour rolling leaderboard.
 
-## � Live Demo
+---
+
+## 🌐 Live Demo
 
 | Component | URL |
 |-----------|-----|
 | **Frontend** | https://gamified-community-feed.vercel.app |
 | **Backend API** | https://karmafeed-backend.onrender.com/api/feed/ |
-| **Leaderboard** | https://karmafeed-backend.onrender.com/api/leaderboard/ |
+| **Leaderboard API** | https://karmafeed-backend.onrender.com/api/leaderboard/ |
 
-> ⚠️ **Note**: Backend is on Render free tier and may take ~30 seconds to wake up on first request.
+> ⚠️ Backend is on Render free tier and may take ~30 seconds to wake up on first request.
 
-## �🏗️ Architecture
+---
 
-```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│   React SPA     │────▶│   Django DRF    │────▶│   PostgreSQL    │
-│   (Tailwind)    │◀────│   (REST API)    │◀────│   (Database)    │
-└─────────────────┘     └─────────────────┘     └─────────────────┘
-```
+## 🛠️ Tech Stack
 
-### Key Features
+**Backend:**
+- Python 3.11 / Django 5.0 / Django REST Framework
+- PostgreSQL 15
+- Gunicorn (WSGI)
+- Docker (multi-stage build)
 
-- **Posts**: Create and view posts
+**Frontend:**
+- React 18
+- Tailwind CSS
+
+**Deployment:**
+- Backend: Render (Docker)
+- Database: Render Managed PostgreSQL
+- Frontend: Vercel
+
+---
+
+## ✨ Core Features
+
+- **Posts**: Create and view posts with author attribution
 - **Nested Comments**: Reddit-style threaded comments (unlimited depth)
-- **Likes**: Like posts (+5 karma) and comments (+1 karma)
-- **Leaderboard**: Top 5 users by karma in last 24 hours
+- **Likes**: Like posts (+5 karma to author) and comments (+1 karma to author)
+- **Leaderboard**: Top 5 users by karma earned in last 24 hours
+- **Delete**: Authors can delete their own posts and comments
 
-## 🚀 Quick Start
+---
 
-### Prerequisites
+## 🚀 How to Run Locally
 
-- Python 3.11+
-- Node.js 18+
-- PostgreSQL 15+
+### Backend (with Docker)
 
-### Backend Setup
+```bash
+# Clone repository
+git clone https://github.com/abhimh33/Gamified-Community-Feed.git
+cd Gamified-Community-Feed
 
-```powershell
-# Navigate to backend
+# Start backend + PostgreSQL with Docker Compose
+docker-compose up --build
+
+# Backend available at http://localhost:8000
+# Database seeded with demo data automatically
+```
+
+### Backend (without Docker)
+
+```bash
 cd backend
 
 # Create virtual environment
 python -m venv venv
+source venv/bin/activate  # Linux/Mac
 .\venv\Scripts\Activate.ps1  # Windows
 
 # Install dependencies
 pip install -r requirements.txt
 
-# Set up environment
-cp .env.example .env  # Then edit with your DB credentials
-
-# Create database
-# In PostgreSQL:
+# Set up PostgreSQL and create database
 # CREATE DATABASE karmafeed;
 
-# Run migrations
-python manage.py migrate
+# Configure environment
+cp .env.example .env  # Edit with your DB credentials
 
-# Create test data (optional)
+# Run migrations and seed data
+python manage.py migrate
 python manage.py seed_data
 
-# Run server
+# Start server
 python manage.py runserver
 ```
 
-### Frontend Setup
+### Frontend
 
-```powershell
-# Navigate to frontend
+```bash
 cd frontend
 
 # Install dependencies
@@ -77,106 +98,56 @@ npm install
 
 # Start development server
 npm start
+
+# Available at http://localhost:3000
 ```
 
-The app will be available at http://localhost:3000
+---
 
-## 🐳 Docker Setup (Alternative)
+## 🚢 Deployment Overview
 
-Run the backend with Docker Compose (includes PostgreSQL):
+### Backend (Render + Docker)
 
-```powershell
-# Build and start containers
-docker-compose up --build
+- **Dockerfile**: Multi-stage build with Python 3.11-slim
+- **render.yaml**: Blueprint for automatic deployment
+- **start.sh**: Runs migrations and seeds demo data on startup
+- **Gunicorn**: 2 workers, 4 threads, gthread worker class
 
-# API available at http://localhost:8000
-# Demo user: testuser / testpass
-```
+### Database (Render)
 
-For production (Render), the Dockerfile uses multi-stage builds with Gunicorn (2 workers, 4 threads).
+- Managed PostgreSQL 15
+- Auto-provisioned via render.yaml blueprint
+- Connection via `DATABASE_URL` environment variable
 
-## 📡 API Endpoints
+### Frontend (Vercel)
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/feed/` | Paginated feed of posts |
-| POST | `/api/posts/` | Create a post |
-| GET | `/api/posts/<id>/` | Post detail with comments |
-| POST | `/api/posts/<id>/comments/` | Create comment |
-| POST | `/api/posts/<id>/like/` | Like a post |
-| DELETE | `/api/posts/<id>/like/` | Unlike a post |
-| POST | `/api/comments/<id>/like/` | Like a comment |
-| GET | `/api/leaderboard/` | Top 5 karma leaders |
+- Auto-deployed from `frontend/` directory
+- Environment variable: `REACT_APP_API_URL` points to Render backend
+- SPA routing configured via `vercel.json`
 
-## 🧪 Running Tests
+---
 
-```powershell
-# Backend tests
-cd backend
-python manage.py test
+## 📸 Screenshots
 
-# Specific test
-python manage.py test feed.tests.test_leaderboard
-```
+![Feed View](screenshots/feed.png)
+*Main feed showing posts with like counts and karma*
 
-## 📊 Performance Considerations
+![Post Detail](screenshots/post-detail.png)
+*Post with nested threaded comments*
 
-### N+1 Query Prevention
+![Leaderboard](screenshots/leaderboard.png)
+*Top 5 karma leaders in last 24 hours*
 
-Loading 50 nested comments uses **exactly 2 queries**:
-1. Post with author (JOIN)
-2. All comments for post (single query + Python tree building)
+![Create Post](screenshots/create-post.png)
+*Post creation modal with validation*
 
-See [EXPLAINER.md](EXPLAINER.md) for details.
+---
 
-### Concurrency
+## 📖 Documentation
 
-Likes are protected against duplicates via:
-- Unique constraint at database level
-- `IntegrityError` handling for race conditions
+- **[EXPLAINER.md](EXPLAINER.md)** - Technical deep-dive on architecture decisions
 
-### Leaderboard
-
-Computed dynamically from `KarmaEvent` table:
-- No stored counters (correctness > performance)
-- Uses index on `(created_at, recipient_id)`
-- Time-windowed aggregation
-
-## 📁 Project Structure
-
-```
-KarmaFeed/
-├── backend/
-│   ├── karmafeed/          # Django project
-│   │   ├── settings.py
-│   │   └── urls.py
-│   ├── feed/               # Main app
-│   │   ├── models.py       # Data models
-│   │   ├── views.py        # API views
-│   │   ├── serializers.py  # DRF serializers
-│   │   ├── services.py     # Business logic
-│   │   ├── queries.py      # Optimized queries
-│   │   └── leaderboard.py  # Leaderboard logic
-│   └── requirements.txt
-├── frontend/
-│   ├── src/
-│   │   ├── components/     # React components
-│   │   ├── api.js          # API client
-│   │   └── App.js          # Main component
-│   └── package.json
-├── README.md
-├── EXPLAINER.md
-└── docker-compose.yml
-```
-
-## 🎯 Design Decisions
-
-| Decision | Choice | Trade-off |
-|----------|--------|-----------|
-| Comment tree | Adjacency List | Simple ORM, O(n) Python assembly |
-| Like storage | ContentType (polymorphic) | Unified karma aggregation |
-| Karma tracking | Event log (append-only) | More storage, always correct |
-| Pagination | Cursor-based | No random access, but O(1) |
+---
 
 ## 📝 License
 
