@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { toggleLike, createComment } from '../api';
+import { toggleLike, createComment, deleteComment } from '../api';
 import { formatDistanceToNow } from '../utils';
 
 /**
@@ -127,6 +127,26 @@ function Comment({ node, postId, onCommentAdded, depth = 0 }) {
           >
             Reply
           </button>
+          
+          {/* Delete button - only show for demo user's comments */}
+          {comment.author.username === 'demo' && (
+            <button
+              onClick={async () => {
+                if (window.confirm('Are you sure you want to delete this comment?')) {
+                  try {
+                    await deleteComment(comment.id);
+                    onCommentAdded(); // Refresh to show comment is gone
+                  } catch (err) {
+                    console.error('Delete failed:', err);
+                    alert('Failed to delete comment: ' + err.message);
+                  }
+                }
+              }}
+              className="text-red-400 hover:text-red-300 transition-colors"
+            >
+              Delete
+            </button>
+          )}
         </div>
 
         {/* Reply Form */}

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { fetchPost, toggleLike, createComment } from '../api';
+import { fetchPost, toggleLike, createComment, deletePost } from '../api';
 import { formatDistanceToNow } from '../utils';
 import Comment from './Comment';
 
@@ -172,6 +172,27 @@ function PostDetail({ postId, onBack }) {
           <span className="text-gray-400 text-sm">
             {post.comment_count} comments
           </span>
+          
+          {/* Delete button - only show for demo user's posts */}
+          {post.author.username === 'demo' && (
+            <button
+              onClick={async () => {
+                if (window.confirm('Are you sure you want to delete this post?')) {
+                  try {
+                    await deletePost(postId);
+                    onBack(); // Go back to feed after deletion
+                  } catch (err) {
+                    console.error('Delete failed:', err);
+                    alert('Failed to delete post: ' + err.message);
+                  }
+                }
+              }}
+              className="flex items-center gap-2 px-4 py-2 bg-red-700 hover:bg-red-600 rounded-lg text-white ml-auto"
+            >
+              <span>🗑️</span>
+              <span>Delete</span>
+            </button>
+          )}
         </div>
 
         {/* Reply Form */}

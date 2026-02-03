@@ -327,6 +327,52 @@ class LeaderboardView(APIView):
         })
 
 
+class PostDeleteView(APIView):
+    """
+    DELETE /api/posts/<post_id>/delete/
+    
+    Delete a post. Only the author (demo user) can delete their own posts.
+    """
+    permission_classes = [permissions.AllowAny]
+    
+    def delete(self, request, post_id):
+        post = get_object_or_404(Post, id=post_id)
+        demo_user = get_demo_user()
+        
+        # Check ownership
+        if post.author_id != demo_user.id:
+            return Response(
+                {'error': 'You can only delete your own posts'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        post.delete()
+        return Response({'success': True, 'message': 'Post deleted'})
+
+
+class CommentDeleteView(APIView):
+    """
+    DELETE /api/comments/<comment_id>/delete/
+    
+    Delete a comment. Only the author (demo user) can delete their own comments.
+    """
+    permission_classes = [permissions.AllowAny]
+    
+    def delete(self, request, comment_id):
+        comment = get_object_or_404(Comment, id=comment_id)
+        demo_user = get_demo_user()
+        
+        # Check ownership
+        if comment.author_id != demo_user.id:
+            return Response(
+                {'error': 'You can only delete your own comments'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        comment.delete()
+        return Response({'success': True, 'message': 'Comment deleted'})
+
+
 # ============================================================================
 # END OF VIEWS - Auth removed for demo mode (all actions use demo user)
 # ============================================================================

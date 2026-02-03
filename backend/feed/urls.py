@@ -7,7 +7,9 @@ from .views import (
     FeedView,
     PostCreateView,
     PostDetailView,
+    PostDeleteView,
     CommentCreateView,
+    CommentDeleteView,
     LikeToggleView,
     LikePostView,
     LikeCommentView,
@@ -21,11 +23,13 @@ urlpatterns = [
     # Posts
     path('posts/', PostCreateView.as_view(), name='post-create'),
     path('posts/<int:post_id>/', PostDetailView.as_view(), name='post-detail'),
+    path('posts/<int:post_id>/delete/', PostDeleteView.as_view(), name='post-delete'),
     path('posts/<int:post_id>/comments/', CommentCreateView.as_view(), name='comment-create'),
     path('posts/<int:post_id>/like/', LikePostView.as_view(), name='like-post'),
     
     # Comments
     path('comments/<int:comment_id>/like/', LikeCommentView.as_view(), name='like-comment'),
+    path('comments/<int:comment_id>/delete/', CommentDeleteView.as_view(), name='comment-delete'),
     
     # Likes (unified endpoint)
     path('likes/toggle/', LikeToggleView.as_view(), name='like-toggle'),
