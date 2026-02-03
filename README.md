@@ -2,7 +2,17 @@
 
 A Community Feed application with nested threaded comments, likes with karma rewards, and a real-time leaderboard.
 
-## 🏗️ Architecture
+## � Live Demo
+
+| Component | URL |
+|-----------|-----|
+| **Frontend** | https://gamified-community-feed.vercel.app |
+| **Backend API** | https://karmafeed-backend.onrender.com/api/feed/ |
+| **Leaderboard** | https://karmafeed-backend.onrender.com/api/leaderboard/ |
+
+> ⚠️ **Note**: Backend is on Render free tier and may take ~30 seconds to wake up on first request.
+
+## �🏗️ Architecture
 
 ```
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
