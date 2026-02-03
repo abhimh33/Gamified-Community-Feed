@@ -131,26 +131,6 @@ export async function toggleLike(targetType, targetId) {
 }
 
 /**
- * Delete a post (uses demo user server-side)
- * Only the author can delete their own posts
- */
-export async function deletePost(postId) {
-  return apiRequest(`/posts/${postId}/delete/`, {
-    method: 'DELETE',
-  });
-}
-
-/**
- * Delete a comment (uses demo user server-side)
- * Only the author can delete their own comments
- */
-export async function deleteComment(commentId) {
-  return apiRequest(`/comments/${commentId}/delete/`, {
-    method: 'DELETE',
-  });
-}
-
-/**
  * Fetch leaderboard
  */
 export async function fetchLeaderboard(hours = 24, limit = 5) {
