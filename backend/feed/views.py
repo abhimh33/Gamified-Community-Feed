@@ -327,6 +327,79 @@ class LeaderboardView(APIView):
         })
 
 
+class PostDeleteView(APIView):
+    """
+    DELETE /api/posts/<post_id>/
+    
+    Delete a post. Only the author (demo user) can delete their own posts.
+    """
+    permission_classes = [permissions.AllowAny]
+    
+    def delete(self, request, post_id):
+        demo_user = get_demo_user()
+        
+        try:
+            post = Post.objects.get(id=post_id)
+        except Post.DoesNotExist:
+            return Response(
+                {'error': 'Post not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Check ownership - only author can delete
+        if post.author_id != demo_user.id:
+            return Response(
+                {'error': 'You can only delete your own posts'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        post.delete()
+        return Response(
+            {'success': True, 'message': 'Post deleted'},
+            status=status.HTTP_200_OK
+        )
+
+
+class CommentDeleteView(APIView):
+    """
+    DELETE /api/comments/<comment_id>/
+    
+    Delete a comment. Only the author (demo user) can delete their own comments.
+    """
+    permission_classes = [permissions.AllowAny]
+    
+    def delete(self, request, comment_id):
+        demo_user = get_demo_user()
+        
+        try:
+            comment = Comment.objects.get(id=comment_id)
+        except Comment.DoesNotExist:
+            return Response(
+                {'error': 'Comment not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Check ownership - only author can delete
+        if comment.author_id != demo_user.id:
+            return Response(
+                {'error': 'You can only delete your own comments'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        post_id = comment.post_id
+        comment.delete()
+        
+        # Update post's comment count
+        Post.objects.filter(id=post_id).update(
+            comment_count=Comment.objects.filter(post_id=post_id).count()
+        )
+        
+        return Response(
+            {'success': True, 'message': 'Comment deleted'},
+            status=status.HTTP_200_OK
+        )
+
+
 # ============================================================================
 # END OF VIEWS - Auth removed for demo mode (all actions use demo user)
 # ============================================================================

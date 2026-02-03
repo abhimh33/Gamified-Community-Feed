@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { fetchPost, toggleLike, createComment } from '../api';
+import { fetchPost, toggleLike, createComment, deletePost } from '../api';
 import { formatDistanceToNow } from '../utils';
 import Comment from './Comment';
 
@@ -16,6 +16,7 @@ function PostDetail({ postId, onBack }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [likeLoading, setLikeLoading] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
   const [showReplyForm, setShowReplyForm] = useState(false);
   const [replyContent, setReplyContent] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -86,6 +87,27 @@ function PostDetail({ postId, onBack }) {
       console.error('Comment failed:', err);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleDeletePost = async () => {
+    if (deleteLoading) return;
+    
+    // Confirm before deleting
+    if (!window.confirm('Are you sure you want to delete this post? This cannot be undone.')) {
+      return;
+    }
+    
+    setDeleteLoading(true);
+    try {
+      await deletePost(postId);
+      // Go back to feed after successful delete
+      onBack();
+    } catch (err) {
+      console.error('Delete failed:', err);
+      alert(err.message || 'Failed to delete post');
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -172,6 +194,18 @@ function PostDetail({ postId, onBack }) {
           <span className="text-gray-400 text-sm">
             {post.comment_count} comments
           </span>
+          
+          {/* Delete button - only show for demo user's own posts */}
+          {post.author.username === 'demo' && (
+            <button
+              onClick={handleDeletePost}
+              disabled={deleteLoading}
+              className="flex items-center gap-2 px-4 py-2 bg-red-900 hover:bg-red-800 rounded-lg text-red-200 ml-auto disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <span>🗑️</span>
+              <span>{deleteLoading ? 'Deleting...' : 'Delete'}</span>
+            </button>
+          )}
         </div>
 
         {/* Reply Form */}

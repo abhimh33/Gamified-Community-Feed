@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { toggleLike, createComment } from '../api';
+import { toggleLike, createComment, deleteComment } from '../api';
 import { formatDistanceToNow } from '../utils';
 
 /**
@@ -24,6 +24,8 @@ const MAX_VISUAL_DEPTH = 6;
 function Comment({ node, postId, onCommentAdded, depth = 0 }) {
   const { comment, replies } = node;
   const [likeLoading, setLikeLoading] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [isDeleted, setIsDeleted] = useState(false);
   const [showReplyForm, setShowReplyForm] = useState(false);
   const [replyContent, setReplyContent] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -84,6 +86,38 @@ function Comment({ node, postId, onCommentAdded, depth = 0 }) {
     }
   };
 
+  const handleDelete = async () => {
+    if (deleteLoading) return;
+    
+    if (!window.confirm('Are you sure you want to delete this comment?')) {
+      return;
+    }
+    
+    setDeleteLoading(true);
+    try {
+      await deleteComment(comment.id);
+      setIsDeleted(true);
+      // Optionally refresh parent to update comment count
+      onCommentAdded();
+    } catch (err) {
+      console.error('Delete failed:', err);
+      alert(err.message || 'Failed to delete comment');
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
+  // If deleted, show placeholder
+  if (isDeleted) {
+    return (
+      <div className={`${indentClass}`}>
+        <div className="bg-gray-800/50 rounded-lg border-l-4 border-gray-600 p-4 text-gray-500 italic">
+          [Comment deleted]
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={`${indentClass}`}>
       <div className={`bg-gray-800 rounded-lg border-l-4 ${borderColor} p-4`}>
@@ -127,6 +161,17 @@ function Comment({ node, postId, onCommentAdded, depth = 0 }) {
           >
             Reply
           </button>
+          
+          {/* Delete button - only show for demo user's own comments */}
+          {comment.author.username === 'demo' && (
+            <button
+              onClick={handleDelete}
+              disabled={deleteLoading}
+              className="text-red-400 hover:text-red-300 transition-colors disabled:opacity-50"
+            >
+              {deleteLoading ? 'Deleting...' : 'Delete'}
+            </button>
+          )}
         </div>
 
         {/* Reply Form */}
