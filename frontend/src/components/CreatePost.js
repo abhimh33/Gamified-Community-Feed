@@ -1,15 +1,15 @@
 import React, { useState } from 'react';
 
+// API base URL - same as api.js
+const API_BASE = process.env.REACT_APP_API_URL || '/api';
+
 /**
  * CreatePost Component
  * 
- * CRITICAL: This component uses DIRECT FETCH with explicit status code handling.
- * NO try/catch. NO early returns. NO error swallowing.
- * 
- * Control Flow:
- *   1. fetch() → always get response
- *   2. response.json() → always parse body
- *   3. Check status codes explicitly → always handle result
+ * Features:
+ * - Client-side validation with clear error messages
+ * - Server-side validation error display
+ * - Uses environment variable for API URL (production support)
  */
 function CreatePost({ onClose, onSuccess }) {
   const [title, setTitle] = useState('');
@@ -21,6 +21,32 @@ function CreatePost({ onClose, onSuccess }) {
   
   // General error (network issues, unexpected errors)
   const [generalError, setGeneralError] = useState(null);
+
+  // Validation constants
+  const MIN_TITLE_LENGTH = 3;
+  const MIN_CONTENT_LENGTH = 10;
+  const MAX_TITLE_LENGTH = 300;
+
+  /**
+   * Client-side validation before submission
+   */
+  const validateForm = () => {
+    const errors = {};
+    
+    if (!title.trim()) {
+      errors.title = 'Title is required';
+    } else if (title.trim().length < MIN_TITLE_LENGTH) {
+      errors.title = `Title must be at least ${MIN_TITLE_LENGTH} characters`;
+    }
+    
+    if (!content.trim()) {
+      errors.content = 'Content is required';
+    } else if (content.trim().length < MIN_CONTENT_LENGTH) {
+      errors.content = `Content must be at least ${MIN_CONTENT_LENGTH} characters`;
+    }
+    
+    return errors;
+  };
 
   /**
    * Clear error for a specific field when user starts typing
@@ -43,20 +69,14 @@ function CreatePost({ onClose, onSuccess }) {
 
   /**
    * SUBMIT HANDLER
-   * 
-   * STRUCTURE (EXACTLY AS REQUIRED):
-   *   const response = await fetch(...)
-   *   const data = await response.json()
-   *   if (response.status === 201) { success }
-   *   else if (response.status === 400) { field errors }
-   *   else { generic error }
-   * 
-   * NO try/catch. NO early returns. NO error swallowing.
    */
   const handleSubmit = async (e) => {
     e.preventDefault();
     
-    if (!title.trim() || !content.trim()) {
+    // Client-side validation first
+    const validationErrors = validateForm();
+    if (Object.keys(validationErrors).length > 0) {
+      setFieldErrors(validationErrors);
       return;
     }
     
@@ -64,50 +84,58 @@ function CreatePost({ onClose, onSuccess }) {
     setFieldErrors({});
     setGeneralError(null);
     
-    // Step 1: Make the fetch request
-    const response = await fetch('/api/posts/', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        title: title.trim(),
-        content: content.trim(),
-      }),
-    });
-    
-    // Step 2: Parse JSON body (ALWAYS, for both success and error)
-    const data = await response.json();
-    
-    // Step 3: Handle response based on status code (NO EARLY RETURNS)
-    if (response.status === 201) {
-      // SUCCESS: Post created
-      setTitle('');
-      setContent('');
-      setSubmitting(false);
-      onSuccess();
-    } else if (response.status === 400) {
-      // VALIDATION ERROR: Parse field errors from DRF format
-      // Backend returns: { "error": "...", "details": { "title": ["Error 1"], "content": ["Error 2"] } }
-      // We extract from details and convert to: { title: "Error 1", content: "Error 2" }
-      const fieldData = data.details || data; // Support both wrapped and unwrapped formats
-      const parsed = {};
-      for (const [field, messages] of Object.entries(fieldData)) {
-        if (Array.isArray(messages) && messages.length > 0) {
-          parsed[field] = messages[0];
-        } else if (typeof messages === 'string') {
-          parsed[field] = messages;
+    try {
+      // Use API_BASE for production URL support
+      const response = await fetch(`${API_BASE}/posts/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          title: title.trim(),
+          content: content.trim(),
+        }),
+      });
+      
+      // Parse JSON body (ALWAYS, for both success and error)
+      const data = await response.json();
+      
+      // Handle response based on status code
+      if (response.status === 201) {
+        // SUCCESS: Post created
+        setTitle('');
+        setContent('');
+        setSubmitting(false);
+        onSuccess();
+      } else if (response.status === 400) {
+        // VALIDATION ERROR: Parse field errors from DRF format
+        const fieldData = data.details || data;
+        const parsed = {};
+        for (const [field, messages] of Object.entries(fieldData)) {
+          if (Array.isArray(messages) && messages.length > 0) {
+            parsed[field] = messages[0];
+          } else if (typeof messages === 'string') {
+            parsed[field] = messages;
+          }
         }
+        setFieldErrors(parsed);
+        setSubmitting(false);
+      } else {
+        // OTHER ERROR: 401, 403, 404, 500, etc.
+        const errorMsg = data.detail || data.error || `Server error (${response.status})`;
+        setGeneralError(errorMsg);
+        setSubmitting(false);
       }
-      setFieldErrors(parsed);
-      setSubmitting(false);
-    } else {
-      // OTHER ERROR: 401, 403, 404, 500, etc.
-      const errorMsg = data.detail || data.error || `Server error (${response.status})`;
-      setGeneralError(errorMsg);
+    } catch (error) {
+      // Network error or JSON parse error
+      setGeneralError('Failed to connect to server. Please try again.');
       setSubmitting(false);
     }
   };
+
+  // Helper to show remaining characters
+  const titleRemaining = MAX_TITLE_LENGTH - title.length;
+  const contentLength = content.trim().length;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -134,7 +162,7 @@ function CreatePost({ onClose, onSuccess }) {
           {/* Title Field */}
           <div className="mb-4">
             <label className="block text-gray-300 text-sm font-medium mb-2">
-              Title
+              Title <span className="text-gray-500">(min {MIN_TITLE_LENGTH} characters)</span>
             </label>
             <input
               type="text"
@@ -146,7 +174,7 @@ function CreatePost({ onClose, onSuccess }) {
                   ? 'border-red-500 focus:border-red-500' 
                   : 'border-gray-600 focus:border-orange-500'
               }`}
-              maxLength={300}
+              maxLength={MAX_TITLE_LENGTH}
             />
             <div className="flex justify-between items-start mt-1">
               <div className="flex-1">
@@ -155,8 +183,8 @@ function CreatePost({ onClose, onSuccess }) {
                   <p className="text-red-400 text-sm">{fieldErrors.title}</p>
                 )}
               </div>
-              <span className="text-xs text-gray-500 ml-2">
-                {title.length}/300
+              <span className={`text-xs ml-2 ${titleRemaining < 20 ? 'text-orange-400' : 'text-gray-500'}`}>
+                {title.length}/{MAX_TITLE_LENGTH}
               </span>
             </div>
           </div>
@@ -164,7 +192,7 @@ function CreatePost({ onClose, onSuccess }) {
           {/* Content Field */}
           <div className="mb-4">
             <label className="block text-gray-300 text-sm font-medium mb-2">
-              Content
+              Content <span className="text-gray-500">(min {MIN_CONTENT_LENGTH} characters)</span>
             </label>
             <textarea
               value={content}
@@ -177,10 +205,16 @@ function CreatePost({ onClose, onSuccess }) {
               }`}
               rows={6}
             />
-            {/* Content error rendered directly under textarea */}
-            {fieldErrors.content && (
-              <p className="text-red-400 text-sm mt-1">{fieldErrors.content}</p>
-            )}
+            <div className="flex justify-between items-start mt-1">
+              <div className="flex-1">
+                {fieldErrors.content && (
+                  <p className="text-red-400 text-sm">{fieldErrors.content}</p>
+                )}
+              </div>
+              <span className={`text-xs ml-2 ${contentLength < MIN_CONTENT_LENGTH ? 'text-gray-500' : 'text-green-400'}`}>
+                {contentLength} characters
+              </span>
+            </div>
           </div>
           
           <div className="flex justify-end gap-3">
@@ -193,7 +227,7 @@ function CreatePost({ onClose, onSuccess }) {
             </button>
             <button
               type="submit"
-              disabled={!title.trim() || !content.trim() || submitting}
+              disabled={submitting}
               className="px-6 py-2 bg-orange-600 hover:bg-orange-700 rounded-lg text-white font-medium disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {submitting ? 'Creating...' : 'Create Post'}
