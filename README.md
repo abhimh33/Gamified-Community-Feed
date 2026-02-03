@@ -149,7 +149,21 @@ npm start
 
 ---
 
-## 📝 License
+## � Future Features
+
+- **User Authentication** — JWT-based login/signup with password reset
+- **User Profiles** — Avatar, bio, karma history, and post/comment activity
+- **Real-time Updates** — WebSocket integration for live likes and comments
+- **Notifications** — Get notified when someone likes or replies to your content
+- **Search & Filters** — Search posts by title, filter by date or popularity
+- **Badges & Achievements** — Earn badges for milestones (first post, 100 karma, etc.)
+- **Dark Mode** — Toggle between light and dark themes
+- **Moderation Tools** — Report content, admin dashboard for managing posts/users
+- **Email Digests** — Weekly summary of top posts and your karma earnings
+
+---
+
+## �📝 License
 
 MIT License
 
