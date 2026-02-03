@@ -60,18 +60,21 @@ RUN python manage.py collectstatic --no-input
 # Switch to non-root user
 USER appuser
 
-# Expose port (Render uses $PORT, default to 8000)
+# Expose port (Render uses $PORT environment variable)
 EXPOSE 8000
 
+# Set default port (Render overrides with $PORT)
+ENV PORT=8000
+
 # Default command - Gunicorn with production settings
-# Migrations should be run via: docker exec <container> python manage.py migrate
-CMD ["gunicorn", "karmafeed.wsgi:application", \
-     "--bind", "0.0.0.0:8000", \
-     "--workers", "2", \
-     "--threads", "4", \
-     "--worker-class", "gthread", \
-     "--worker-tmp-dir", "/dev/shm", \
-     "--access-logfile", "-", \
-     "--error-logfile", "-", \
-     "--capture-output", \
-     "--enable-stdio-inheritance"]
+# Uses shell form to expand $PORT variable (Render requirement)
+CMD gunicorn karmafeed.wsgi:application \
+    --bind 0.0.0.0:$PORT \
+    --workers 2 \
+    --threads 4 \
+    --worker-class gthread \
+    --worker-tmp-dir /dev/shm \
+    --access-logfile - \
+    --error-logfile - \
+    --capture-output \
+    --enable-stdio-inheritance

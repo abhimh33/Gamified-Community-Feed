@@ -1,0 +1,40 @@
+# =============================================================================
+# Render.com Blueprint - Docker Deployment
+# =============================================================================
+# Deploy with: Connect GitHub repo → Render auto-detects this file
+
+databases:
+  - name: karmafeed-db
+    plan: free
+    databaseName: karmafeed
+    user: karmafeed
+
+services:
+  - type: web
+    name: karmafeed-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    healthCheckPath: /api/feed/
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: karmafeed-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DEBUG
+        value: "False"
+      - key: ALLOWED_HOSTS
+        value: ".onrender.com"
+      - key: CORS_ALLOWED_ORIGINS
+        value: "https://your-frontend.vercel.app"
+    buildCommand: |
+      python manage.py migrate &&
+      python manage.py shell -c "
+      from django.contrib.auth.models import User
+      if not User.objects.filter(username='demo').exists():
+          User.objects.create_user('demo', 'demo@karmafeed.local', 'demo')
+          print('Demo user created')
+      "
